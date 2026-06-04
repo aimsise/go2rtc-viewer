@@ -1,0 +1,54 @@
+# Tests-only CI for go2rtc-viewer.
+#
+# This repo has NO build tools: vanilla JS (web/), Node std-lib helpers
+# (recordings/), bash scripts, a python hook (.claude/hooks/), and i18n dicts.
+# CI therefore runs static + behavioral tests ONLY — no deploy / release /
+# publish, and nothing that needs a browser, go2rtc, or real cameras (the
+# Playwright verify-ui checks are intentionally excluded; they are not
+# CI-feasible). Every test runs headless on a clean checkout.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# Cancel superseded runs on the same ref to save minutes.
+concurrency:
+  group: tests-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  tests:
+    # The produced check / status context name MUST be exactly "Tests".
+    name: Tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Show tool versions
+        run: |
+          node --version
+          python3 --version
+          bash --version | head -1
+
+      - name: JS / Bash / Python syntax checks
+        run: bash tests/syntax-checks.sh
+
+      - name: i18n key parity (ja + en)
+        run: node tests/i18n-parity.js
+
+      - name: secret-guard hook behavior
+        run: bash tests/secret-guard.sh
+
+      - name: No real secrets in tracked files
+        run: node tests/no-real-secrets.js
