@@ -1,15 +1,15 @@
 **English** | [日本語](README.ja.md)
 
-# Recordings (Playback) Feature — DVR Recording Viewer
+# Recordings (Playback) Feature — ONVIF Profile G Recording Viewer
 
-This directory provides **search, download, and playback** features for the security DVR (**Tsukamoto Musen OEM XVR**, IP `192.0.2.14`). It runs as a backend (Node standard modules + `ffmpeg`) that is **independent of the root go2rtc live viewer**, listens on a separate port `http://localhost:3914`, and accumulates recording data under this `recordings/` directory.
+This directory provides **recording search, replay, and download** for an NVR/DVR over **ONVIF Profile G** — a vendor-neutral standard (Recording Search + Replay Control + Device Management). It runs as a backend (Node standard modules + `ffmpeg`) that is **independent of the root go2rtc live viewer**, listens on a separate port `http://localhost:3914`, and stores exported clips under this `recordings/` directory.
 
-> **Important — On-device testing has confirmed that this DVR's recording HTTP API is non-functional on the current firmware.**
-> `R.SearchRecord` (the netsdk search API) **always returns 0 items** even when it responds with "success", and
-> `cgi-bin/flv.cgi` (recording download) returns **HTTP 404 for every parameter combination** (see [Why You Can't Download Directly from the DVR](#why-you-cant-download-directly-from-the-dvr-conclusions-from-on-device-testing)).
-> Therefore, **the recording feature that actually works captures the RTSP stream of the DVR's source camera `192.0.2.146` and segment-records it yourself**. The DVR netsdk / flv.cgi clients are bundled "in case they come back to life on a future firmware or different model," but on this unit (FW 3.2.2.6F), use them with the understanding that no index is returned.
+The default backend (`RECORDINGS_BACKEND=onvif`) speaks ONVIF Profile G to any conformant NVR/DVR. A **legacy, vendor-specific netsdk/`flv.cgi` client** (for the Tsukamoto Musen OEM XVR and similar) is retained behind `RECORDINGS_BACKEND=netsdk` as an opt-in fallback — see [Legacy netsdk/flv.cgi Fallback](#legacy-netsdkflvcgi-fallback).
 
-> **⚠️ Security Warning (must read)**: The target devices run with **`admin` / empty password**.
+> **Important — best-effort, unverified against real Profile G hardware.**
+> This is a spec-compliant ONVIF Profile G client, but it has **not** been validated end-to-end against a real Profile G NVR/DVR: the only on-hand unit **404s on every `/onvif/*` path** and does not answer unicast WS-Discovery Probe (see [Why the On-Hand Unit Cannot Be Used](#why-the-on-hand-unit-cannot-be-used-conclusions-from-on-device-testing)). The protocol logic (WS-Security PasswordDigest, SOAP envelopes, response parsing, Fault handling) is mechanically unit-tested, but treat live operation on your device as untested until you confirm it. The legacy netsdk path is likewise unverified on this unit (search returns 0 items, `flv.cgi` 404s).
+
+> **⚠️ Security Warning (must read)**: The target devices may run with **`admin` / empty password**.
 > Be sure to read the [Security Warning](#security-warning-must-read) for details, risks, and countermeasures.
 
 ---
@@ -23,13 +23,12 @@ This directory provides **search, download, and playback** features for the secu
 - [Usage (CLI)](#usage-cli)
 - [Configuration (Environment Variables)](#configuration-environment-variables)
 - [How It Works (Architecture)](#how-it-works-architecture)
-- [DVR Recording API Specification (On-Device Testing Summary)](#dvr-recording-api-specification-on-device-testing-summary)
-  - [Authentication](#authentication)
-  - [Recording Search `R.SearchRecord`](#recording-search-rsearchrecord)
-  - [Recording Playback / Download `flv.cgi`](#recording-playback--download-flvcgi)
-  - [Related Endpoints Usable for Configuration Retrieval](#related-endpoints-usable-for-configuration-retrieval)
-  - [Channel Configuration](#channel-configuration)
-- [Why You Can't Download Directly from the DVR (Conclusions from On-Device Testing)](#why-you-cant-download-directly-from-the-dvr-conclusions-from-on-device-testing)
+  - [ONVIF Profile G flow](#onvif-profile-g-flow)
+  - [Authentication & clock skew](#authentication--clock-skew)
+  - [Channel ↔ RecordingToken mapping & UTC time](#channel--recordingtoken-mapping--utc-time)
+  - [Replay window export — approach (A) and fallback (B)](#replay-window-export--approach-a-and-fallback-b)
+- [Legacy netsdk/flv.cgi Fallback](#legacy-netsdkflvcgi-fallback)
+- [Why the On-Hand Unit Cannot Be Used (Conclusions from On-Device Testing)](#why-the-on-hand-unit-cannot-be-used-conclusions-from-on-device-testing)
 - [Troubleshooting](#troubleshooting)
 - [Security Warning (must read)](#security-warning-must-read)
 - [File Structure](#file-structure)
@@ -40,23 +39,23 @@ This directory provides **search, download, and playback** features for the secu
 
 | Item | Details |
 | --- | --- |
-| Target DVR | Tsukamoto Musen OEM XVR (`192.0.2.14`, FW 3.2.2.6F / 2022) |
-| Authentication | HTTP Basic, `admin` / empty password (overridable via environment variables) |
-| Backend | Node.js (standard modules only) + `ffmpeg`. No additional npm dependencies |
+| Default backend | **ONVIF Profile G** (Recording Search `tse` + Replay Control `trp` + Device Management `tds`) — vendor-neutral |
+| Legacy backend | netsdk `R.SearchRecord` / `flv.cgi` (Tsukamoto Musen OEM XVR etc.), opt-in via `RECORDINGS_BACKEND=netsdk` |
+| Authentication | WS-Security UsernameToken (PasswordDigest) → HTTP-Digest → Basic ladder (ONVIF); HTTP Basic (legacy netsdk) |
+| Backend runtime | Node.js (standard modules only — `node:http`/`https`/`crypto`/`url`/`fs`/`path`/`child_process`) + `ffmpeg`. No npm dependencies |
 | Port | `http://localhost:3914` (separate from go2rtc's `1984`; can coexist) |
-| Actual recording source | The source camera of DVR ch0 = **WTW-IPC `192.0.2.146`** RTSP |
+| Export pipeline | ONVIF `GetReplayUri` → RTSP → `ffmpeg -c copy` → browser-playable MP4 |
 | Storage location | Under this `recordings/` directory (outputs such as `data/` are `.gitignore`-d) |
 | Viewing scope | **LAN only** (internet exposure is not intended) |
 
 What this backend can do:
 
-1. **DVR netsdk search / flv.cgi download client + Web UI (best-effort / 0 items & 404 on this unit)**
-   It bundles a thin client that calls `R.SearchRecord` with the correct request format (full date-time, correct `Channel`/`Type`), plus a Web UI to search → play → download MP4 in the browser. **On this unit, even a success response yields 0 items**, and `flv.cgi` returns **404**, but in environments (other models/firmware) where the index is returned, it can be used to list/download recordings (see [API Specification](#dvr-recording-api-specification-on-device-testing-summary)).
-2. **DVR status retrieval** (displays HDD / connected IPC / recording state via `/netsdk/Stat`, etc.).
+1. **Search recordings on a Profile G NVR/DVR** via `FindRecordings` / `GetRecordingSearchResults`, presenting them in the existing Web UI (search → play → download MP4 in the browser).
+2. **Replay/export a time window** by resolving an RTSP replay URI (`GetReplayUri`) and remuxing it to MP4 with `ffmpeg -c copy`.
+3. **Report device status** via `probe()` (reachability, chosen auth scheme, device time/skew, discovered service XAddrs, recording count).
 
-> **This repository does not include an automatic recording feature (recorder).** If you want to retain recordings in an environment like this unit where the DVR's HTTP recording API does not work, manually capture the RTSP of the same camera `192.0.2.146` used by the go2rtc live view, using `ffmpeg` (e.g.,
-> `ffmpeg -i rtsp://<cam>/ch0_0.264 -c copy -f segment -segment_time 600 out_%Y%m%d_%H%M%S.mp4`).
-> To extract "the actual recording files inside the DVR," you need the **vendor's native client on a real Windows machine / IE + ActiveX OCX** (this unit's Web UI uses a legacy Flash + OCX design that cannot be reproduced with `curl`/`ffmpeg`).
+> **This repository does not include an automatic recording feature (recorder).** It is a *viewer/exporter*: it pulls recordings that already exist on the NVR/DVR. If your device's ONVIF Profile G implementation does not expose recordings (or you are on the legacy unit where nothing works — see below), you can instead manually segment-capture the source camera's RTSP with `ffmpeg`, e.g.
+> `ffmpeg -i rtsp://<cam>/ch0_0.264 -c copy -f segment -segment_time 600 out_%Y%m%d_%H%M%S.mp4`.
 
 ---
 
@@ -69,7 +68,7 @@ What this backend can do:
   command -v node
   ```
 
-- **`ffmpeg`** installed (required for recording, MP4 conversion, and thumbnail generation):
+- **`ffmpeg`** installed (required for the RTSP → MP4 remux on export):
 
   ```sh
   command -v ffmpeg
@@ -81,14 +80,14 @@ What this backend can do:
   brew install ffmpeg
   ```
 
-- Connected to the **same LAN** as the DVR (`192.0.2.14`) and the source camera (`192.0.2.146`).
-- A modern browser capable of playing MP4 (H.264) (Safari / Chrome / Firefox / Edge).
+- Connected to the **same LAN** as the NVR/DVR (`ONVIF_HOST`).
+- A modern browser capable of playing MP4 (H.264/H.265) (Safari / Chrome / Firefox / Edge).
 
 ---
 
 ## Starting and Stopping
 
-The server in this directory is independent of the root go2rtc. **You may run both at the same time** (different ports: recording = `3914`, live = `1984`).
+The server in this directory is independent of the root go2rtc. **You may run both at the same time** (different ports: recordings = `3914`, live = `1984`).
 
 **Start:**
 
@@ -98,8 +97,9 @@ node recordings/server.js
 # → opens http://localhost:3914 in your default browser
 ```
 
-- Once started, the recording UI / API listens at `http://localhost:3914`.
+- Once started, the recordings UI / API listens at `http://localhost:3914`.
 - To change the port, override it with the `PORT` environment variable (see [Configuration](#configuration-environment-variables)).
+- The startup log prints the active backend (`onvif` by default) and, in ONVIF mode, the discovered service XAddrs and chosen auth scheme.
 
 **Stop:**
 
@@ -108,7 +108,7 @@ node recordings/server.js
   (e.g., if you started with `node recordings/server.js &`, run `kill %1`).
 
 > To start/stop live viewing (go2rtc), use the root `./start.sh` / `./stop.sh`.
-> Because it is independent of the recording server, starting/stopping only one of them is fine.
+> Because it is independent of the recordings server, starting/stopping only one of them is fine.
 
 ---
 
@@ -117,268 +117,197 @@ node recordings/server.js
 Open `http://localhost:3914` in your browser.
 
 1. Specify a **channel** and a **date-time range (start / end)**, then **search**.
-   - Self-hosted recordings (clips already accumulated in `recordings/`) are listed.
-   - Each clip shows its **start time, duration, size, and thumbnail**.
-2. Selecting a clip from the list plays it in the in-browser `<video>` element
-   (self-hosted recordings are MP4 / H.264, so no additional plugin is required).
+   - Recordings on the NVR/DVR whose coverage overlaps the window are listed.
+   - Each item shows its **start time, duration, and type chips** (ONVIF coverage is per-recording, not per-event — see the note below).
+2. Selecting an item from the list plays it in the in-browser `<video>` element (the backend remuxes the ONVIF RTSP replay to MP4 on the fly).
 3. Use the **Download** button to save the MP4 locally.
 
-> **About direct DVR search**: The UI also has a mode that calls the DVR's `R.SearchRecord` directly, but on this unit it **always returns 0 items** for the [reasons described above](#why-you-cant-download-directly-from-the-dvr-conclusions-from-on-device-testing). Check actual data on the self-hosted recording side.
+> **Recording types on ONVIF**: ONVIF Profile G exposes recording *coverage* (earliest/latest, tracks), not a Timing/Motion/Alarm/Manual event bitmask. Each item therefore defaults to the **`Timing`** type so the type chips/timeline still render. This is per-recording coverage, not per-event metadata.
 
 ---
 
 ## Usage (CLI)
 
-You can try DVR recording search and download from the terminal without a browser. The CLI is
+You can try recording search and download from the terminal without a browser. The CLI is
 `recordings/download-cli.js` (`server.js` is the server for the Web UI and has no subcommands). Treat `--help` as the source of truth for flags. Typical operations:
 
 ```sh
 # Usage
 node recordings/download-cli.js --help
 
-# DVR recording search (today; always 0 items on this unit)
+# List recordings (today)
 node recordings/download-cli.js --list
 
-# Specify a range to attempt search and download
-#   Date-time must be a full date-time "YYYY-MM-DD HH:MM:SS" (time-only results in Search Failed!)
+# Specify a range to search and download
 #   --chn is 1-based, same as the UI display (--chn 1 = UI's ch1)
 node recordings/download-cli.js --chn 1 \
   --begin "2026-06-02 00:00:00" --end "2026-06-02 23:59:59"
 ```
 
-> Note: The key points are the DVR specifications that "**date-time must be a full date-time string**" and "**`--chn` is 1-based, same as the UI display**" (see [API Specification](#dvr-recording-api-specification-on-device-testing-summary)). DVR status (connectivity, authentication, HDD/IPC/recording state) can also be checked from the Web UI (`server.js`) side.
+> The CLI honors the same `RECORDINGS_BACKEND` switch as the server. In ONVIF mode it lists/searches via the Profile G client and downloads via the replay RTSP URI → `ffmpeg` (seekable file output, `-movflags +faststart`).
 
 ---
 
 ## Configuration (Environment Variables)
 
-Credentials and connection targets can be **overridden via environment variables**. **Do not write secrets other than defaults into the source** (once you set a password, pass it via an environment variable).
+Credentials and connection targets are **provided via environment variables** (read from the gitignored `.env`; see the repo-root `.env.example`). **Do not write secrets into the source.**
+
+The backend reads `ONVIF_*` first and **falls back to the legacy `DVR_*`** if the ONVIF equivalent is unset (so an existing `.env` keeps working with no migration). `ONVIF_PASS ?? DVR_PASS ?? ''` preserves the intentional empty-password semantics.
+
+### Backend selector
 
 | Environment Variable | Default | Description |
 | --- | --- | --- |
-| `DVR_HOST` | `192.0.2.14` | DVR IP / hostname |
-| `DVR_USER` | `admin` | DVR Basic auth user |
-| `DVR_PASS` | (empty) | DVR Basic auth password |
+| `RECORDINGS_BACKEND` | `onvif` | `onvif` (default — ONVIF Profile G) or `netsdk` (legacy `flv.cgi` fallback) |
+
+### ONVIF Profile G (default backend)
+
+| Environment Variable | Default | Fallback | Description |
+| --- | --- | --- | --- |
+| `ONVIF_HOST` | (empty) | `DVR_HOST` | NVR/DVR IP / hostname (may include `:port`; default port 80) |
+| `ONVIF_USER` | `admin` | `DVR_USER` | Username (WS-Security / HTTP-Digest / Basic) |
+| `ONVIF_PASS` | (empty) | `DVR_PASS` | Password (empty string allowed) |
+| `ONVIF_DEVICE_PATH` | `/onvif/device_service` | — | Device service entry path (override for non-standard units) — *optional* |
+| `ONVIF_PORT` | from host or `80` | — | Explicit ONVIF port when not given as `host:port` — *optional* |
+| `ONVIF_HONOR_XADDR` | `false` | — | `true` = POST to advertised `GetServices` XAddrs as-is; default rewrites them onto the configured `host:port` (XAddr-rewrite mitigation) — *optional* |
+| `ONVIF_API_TIMEOUT_MS` | `15000` | `DVR_API_TIMEOUT_MS` | SOAP request timeout (→504 on miss) |
+
+### Legacy / shared
+
+| Environment Variable | Default | Description |
+| --- | --- | --- |
+| `DVR_HOST` / `DVR_USER` / `DVR_PASS` | `192.0.2.x` (placeholder) / `admin` / (empty) | **Legacy** netsdk credentials; also the fallback for the `ONVIF_*` equivalents above |
+| `DVR_DEV` / `DVR_VER` / `DVR_MAX_CHN` | `XVR` / `1.0` / `9` | **Legacy, netsdk-only.** Unused in ONVIF mode (channel count is derived from the RecordingToken map) |
 | `BIND_ADDR` | `127.0.0.1` | Listen address. Defaults to localhost-only. Use `0.0.0.0` only when exposing to the LAN |
-| `PORT` | `3914` | Recording server listen port |
+| `PORT` | `3914` | Recordings server listen port |
+| `FFMPEG_PATH` | (PATH) | `ffmpeg` location if not on `PATH` |
 
 Example usage:
 
 ```sh
-# Example of starting on a different port in an environment with a password set
-DVR_PASS='********' PORT=4000 node recordings/server.js
+# ONVIF backend, password set, custom port
+ONVIF_HOST=192.0.2.20 ONVIF_PASS='********' PORT=4000 node recordings/server.js
+
+# Opt into the legacy netsdk/flv.cgi fallback
+RECORDINGS_BACKEND=netsdk DVR_HOST=192.0.2.14 node recordings/server.js
 ```
 
-> **Strongly recommended**: Always set a password for the DVR / camera and pass it via environment variables such as `DVR_PASS`. For the dangers of operating with an empty password, see the [Security Warning](#security-warning-must-read).
+> **Strongly recommended**: Always set a password on the NVR/DVR / camera and pass it via `ONVIF_PASS` (or `DVR_PASS`). For the dangers of operating with an empty password, see the [Security Warning](#security-warning-must-read).
 
 ---
 
 ## How It Works (Architecture)
 
-Because the DVR's own recording HTTP API does not work on this unit ([see below](#why-you-cant-download-directly-from-the-dvr-conclusions-from-on-device-testing)), **the actual recording is done by capturing the RTSP of the source camera `192.0.2.146` behind DVR ch0** yourself. It shares the same camera and the same RTSP as the go2rtc live viewer.
+In the default ONVIF Profile G mode, the backend speaks SOAP-over-HTTP to the NVR/DVR to discover services, search recordings, and resolve an RTSP replay URI, then remuxes that RTSP to a browser-playable MP4 with `ffmpeg -c copy`. The browser only ever talks to this backend's own origin (`localhost:3914`); all ONVIF/SOAP/RTSP traffic is server-side.
+
+### ONVIF Profile G flow
 
 ```
-                         (best-effort / 0 items & 404 on this unit)
-        ┌───────────── HTTP Basic ─────────────┐
-        │  netsdk R.SearchRecord / flv.cgi      │
-        ▼                                       │
-┌──────────────────┐                            │
-│  DVR (XVR)        │  ch0 source = same camera  │
-│  192.0.2.14     │ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ┘
-└──────────────────┘
-                                  RTSP / H.265 (working path)
-┌──────────────────┐ ───────────────────────────▶ ┌──────────────────────────────┐
-│  WTW-IPC camera   │   ch0_0.264 (main 4K)         │  Recording server (localhost:3914) │
-│  192.0.2.146    │   ch0_1.264 (sub 800x448)      │  ┌────────────────────────┐  │
-│  admin / empty     │                               │  │ ffmpeg                 │  │
-└──────────────────┘                               │  │ - time-segment recording│  │
-                                                    │  │ - FLV/HEVC → MP4(H.264) │  │
-                                                    │  │ - thumbnail (JPEG) gen  │  │
-                                                    │  └───────────┬────────────┘  │
-                                                    │  stored & indexed in recordings/ │
-                                                    └──────────────┬───────────────┘
-                                                                   │ HTTP (MP4 / JSON)
-                                                                   ▼
-                                                     ┌──────────────────────────┐
-                                                     │  Browser                   │
-                                                     │  recording UI at localhost:3914 │
-                                                     │  MP4 playback / DL via <video> │
-                                                     └──────────────────────────┘
+                              recordings backend (localhost:3914)
+                              ┌──────────────────────────────────────────┐
+  ONVIF NVR/DVR               │  recordings/onvif.js (Profile G client)   │
+  (ONVIF_HOST)                │                                           │
+  ┌──────────────┐  SOAP/HTTP │  1. GetSystemDateAndTime  (unauth → skew) │
+  │  tds device  │◀──────────▶│  2. GetServices           (→ XAddrs)      │
+  │  tse search  │            │  3. FindRecordings +                      │
+  │  trp replay  │            │     GetRecordingSearchResults (→ tokens)  │
+  └──────┬───────┘            │  4. GetReplayUri          (→ rtsp:// URI) │
+         │ RTSP replay        └───────────────────┬───────────────────────┘
+         │ (Range/window)                         │ rtsp:// (+window+creds)
+         ▼                                         ▼
+                              ┌──────────────────────────────────────────┐
+                              │  ffmpeg -rtsp_transport tcp -i <uri>      │
+                              │         -c copy → fragmented/seekable MP4 │
+                              └───────────────────┬───────────────────────┘
+                                                  │ HTTP (MP4 / JSON)
+                                                  ▼
+                                        ┌──────────────────────┐
+                                        │  Browser              │
+                                        │  recordings UI @3914  │
+                                        │  <video> MP4 play/DL  │
+                                        └──────────────────────┘
 ```
 
-- **Input (working)**: `rtsp://${RTSP_USER}:${RTSP_PASS}@192.0.2.146:554/ch0_0.264` (main 4K, HEVC) /
-  `.../ch0_1.264` (sub 800×448, HEVC).
-- **Conversion**: `ffmpeg` performs time-segment recording, generates H.264 MP4 for browser playback, and also creates thumbnails (JPEG). The server maintains the index (time, duration, size).
-- **Input (best-effort)**: DVR `192.0.2.14` netsdk `R.SearchRecord` (recording list) / `flv.cgi` (download). **On this unit it returns 0 items / 404**, but it is designed so that on a supported-firmware unit you can list and download from here.
-- **Output**: Recording clips (MP4) and JSON metadata are placed under `recordings/` and served from `http://localhost:3914`.
+1. **`GetSystemDateAndTime`** (unauthenticated, `tds`): read the device UTC clock and compute the skew used to stamp the WS-Security `Created` timestamp and every search/replay window.
+2. **`GetServices`** (`tds`): discover the Search (`tse`) / Replay (`trp`) / Recording (`trc`) service XAddrs (falls back to `GetCapabilities`, then to the fixed `/onvif/search`, `/onvif/replay` paths).
+3. **`FindRecordings`** + poll **`GetRecordingSearchResults`** (`tse`) until `Completed`: collect `RecordingInformation[]` (RecordingToken, Source, EarliestRecording, LatestRecording, tracks). Falls back to `trc GetRecordings` if Search is unsupported.
+4. **`GetReplayUri`** (`trp`): resolve the RTSP replay URI for the selected RecordingToken.
+5. **`ffmpeg -c copy`**: feed the replay RTSP (with the time window applied — see below) to `ffmpeg`, which remuxes (no re-encode) to a browser-playable MP4 streamed to the client.
+
+### Authentication & clock skew
+
+ONVIF auth varies by firmware, so the client uses a ladder: **WS-Security UsernameToken (PasswordDigest)** first, then **HTTP-Digest** (RFC 2617, recomputed on a `401 WWW-Authenticate: Digest`), then **Basic**. The chosen scheme is remembered for subsequent calls and surfaced via `probe()`/`/api/health`. PasswordDigest is `Base64(SHA1(base64decode(Nonce) + Created_utf8 + Password_utf8))` computed with `node:crypto`.
+
+Wrong/skewed clocks are the #1 cause of `NotAuthorized` faults, so `GetSystemDateAndTime` is called **first** (unauthenticated) to measure `deviceUTC − now`; that skew is added to the `Created` header and to all search/replay windows.
+
+### Channel ↔ RecordingToken mapping & UTC time
+
+ONVIF identifies streams by opaque **RecordingToken**, not a 0-based channel number. The backend enumerates recordings once, sorts them by Source name then EarliestRecording, and assigns each a **stable 0-based `chn`** (cached server-side with a short TTL). The frontend keeps speaking `chn`/`channel` + Unix-second `begin`/`end`; the backend translates.
+
+ONVIF `xs:dateTime` is **UTC** (`...Z`). All scope/replay times are formatted as UTC ISO-8601 with the measured skew applied — the legacy host-local `toDvrDateTime()` is **never** used for ONVIF.
+
+### Replay window export — approach (A) and fallback (B)
+
+`GetReplayUri` returns an RTSP URI that replays the *whole* recording; the requested `[start,end]` window must be applied at the RTSP layer. ffmpeg's RTSP demuxer does **not** emit the ONVIF replay headers (`Require: onvif-replay`, `Range: clock=`, `Rate-Control: no`) by itself, so:
+
+- **Approach (A) — implemented default.** Append vendor time-range query params to the replay URI (`…?token=…&starttime=20260604T080000Z&endtime=20260604T090000Z`, compact ISO-8601 basic `YYYYMMDDThhmmssZ`) and let `ffmpeg -rtsp_transport tcp -i <uri> -c copy` pull it. Works on common Hikvision/Dahua/Axis variants and reuses the existing ffmpeg remux/teardown leg with no new media code.
+  - **Limitation — real-time pacing.** If the device ignores a speed param and paces at 1× (`Rate-Control: yes` default), exporting a 1-hour clip takes ~1 hour. Clip windows for timeline scrubbing are usually short, so 1× is acceptable for the common case; for long/fast exports, use (B).
+- **Approach (B) — documented fallback (not built by default).** Hand-roll the RTSP control channel (OPTIONS/DESCRIBE/SETUP/PLAY) emitting `Require: onvif-replay` + `Range: clock=<start>-<end>` + `Rate-Control: no`, demux interleaved RTP, and depacketize H.264 to Annex-B for ffmpeg. Gives precise windows **and** fast (`Rate-Control: no`) export, at the cost of substantial RTP/H.264 code. Use only for devices that ignore the query-param window or strictly require the `Range: clock` header.
+
+> **go2rtc is deliberately not used** for replay: it cannot inject the ONVIF replay RTSP headers (`Require:` / `Range: clock` / `Rate-Control`), which is a maintainer-rejected feature (go2rtc issues #952 / #1104).
 
 ---
 
-## DVR Recording API Specification (On-Device Testing Summary)
+## Legacy netsdk/flv.cgi Fallback
 
-The following is **the specification confirmed on the real device `192.0.2.14` (XVR, FW 3.2.2.6F)**. It is kept as a basis for using the direct DVR search client and for porting to other models. Note that **on this unit, search returns 0 items and `flv.cgi` returns 404** (see [Conclusions](#why-you-cant-download-directly-from-the-dvr-conclusions-from-on-device-testing)).
+Setting `RECORDINGS_BACKEND=netsdk` selects the original vendor-specific path: netsdk `R.SearchRecord` (recording list) + `cgi-bin/flv.cgi` (FLV download) over HTTP Basic, with `ffmpeg` remuxing FLV → MP4. It targets the **Tsukamoto Musen OEM XVR** (`DVR_HOST`, FW 3.2.2.6F / 2022) and similar units.
 
-### Authentication
+This path is **retained, not deleted**, so other firmware/models keep a working-shaped client. It is **unverified on the on-hand unit**: `R.SearchRecord` returns a "success" response with **0 items**, and `flv.cgi` returns **HTTP 404** for every parameter combination (see [below](#why-the-on-hand-unit-cannot-be-used-conclusions-from-on-device-testing)). Key netsdk specifics if you use it:
 
-- **HTTP Basic** only. User `admin`, password **empty**.
-- Header: `Authorization: Basic <base64("admin:")>` (colon after `admin`, empty PW).
-- Authentication is enforced in practice (wrong PW / no PW → **401**, `admin:` empty → **200**).
-- `POST /login` (`{DEV:"XVR",VER:"1.0",Parameter:{username:"admin",passwd:""}}`) also
-  succeeds, but **no separate token is issued** (Basic only; the UI merely saves credentials in the cookies `xvr_usr` / `xvr_pwd`).
-- The connection target and credentials can be overridden via the environment variables `DVR_HOST` / `DVR_USER` / `DVR_PASS`.
-
-### Recording Search `R.SearchRecord`
-
-```
-POST http://192.0.2.14/netsdk/R.SearchRecord
-Content-Type: application/json;charset=utf-8
-Authorization: Basic <base64("admin:")>
-```
-
-Request body (**this form is "success"**; returns 0 items on this unit):
-
-```json
-{
-  "DEV": "XVR",
-  "VER": "1.0",
-  "API": "R.SearchRecord",
-  "Parameter": {
-    "Channel": ["True","True","True","True","True","True","True","True","True"],
-    "Type": ["Timing","Motion","Alarm","Manual"],
-    "BeginTime": "2026-06-02 00:00:00",
-    "EndTime": "2026-06-03 23:59:59",
-    "PageSize": "100",
-    "CurrentPage": "1"
-  }
-}
-```
-
-Confirmed key points:
-
-- **`BeginTime` / `EndTime` must be "full date-time strings `YYYY-MM-DD HH:MM:SS`"**, otherwise they will not succeed.
-  - OK example: `"2026-06-02 00:00:00"` / `"2026-06-03 23:59:59"` → `RetDetail:"Search Success!"` (`RetCode:"0"`).
-  - **NG example**: time only `"00:00:00"` / `"23:59:59"`, Unix-second integers, empty `Parameter` →
-    all result in `RetDetail:"Search Failed!"` (`RetCode:"-1"`, though HTTP is 200).
-  - **Do not include `Reload:"True"`** (including it actually causes `Search Failed!`).
-- **`Channel`** is a boolean array of `MAX_CHN` (=9) elements. `True` means "include that channel in the search" (not a channel name or index). To search ch0 only, use
-  `["True","False","False","False","False","False","False","False","False"]`.
-- **`Type`** is a name array of bit categories `{Timing, Motion, Alarm, Manual}` (the integer `15` or `[1,2,4,8]` also succeeds).
-- The DVR's built-in clock matches the host (measured `SystemState.DateTime = "2026/06/03 ..."`) = **no offset correction needed**.
-
-Success response schema (**determined from the decoding logic of the Web UI's own JS; no Item on this unit**):
-
-```json
-{
-  "DEV": "XVR", "VER": "1.0", "API": "R.SearchRecord",
-  "RetCode": "0", "RetDetail": "Search Success!",
-  "ReadCnt": "<count>",
-  "DataBasePath": "<path>",
-  "Item": [
-    { "Channel": "0", "TimeStart": 1717286400, "TimeEnd": 1717290000, "Type": 1 }
-  ]
-}
-```
-
-- `Channel` is a **0-based number string** (the UI displays `Number(Channel)+1`).
-- `TimeStart` / `TimeEnd` are **Unix seconds (integers)**. The UI restores them with `new Date(1000*TimeStart)`. `Duration = TimeEnd - TimeStart`.
-- `Type` is a **bitmask** `{1:Timing, 2:Motion, 4:Alarm, 8:Manual}`.
-- **Measured on this unit**: For the entire 2024–2026 period and all `Channel`/`Type` values, it always returns `ReadCnt:"0"`, no `Item`, and `DataBasePath:"$"` (an unresolved placeholder). Even with the 2TB HDD 100% used and recording in progress (`RecordingState:"1"`), it returns 0 items.
-
-### Recording Playback / Download `flv.cgi`
-
-The format the UI generates (**HTTP 404 on this unit**):
-
-```
-GET http://192.0.2.14/cgi-bin/flv.cgi?u=${DVR_USER}&p=${DVR_PASS}&mode=time&chn=<ch>&begin=<UnixSec>&end=<UnixSec>&audio=54&mute=false&rnd=<random>
-```
-
-- `chn` is **0-based**, `begin`/`end` are the recording Item's `TimeStart`/`TimeEnd` (**Unix seconds**), and `p=` is the empty password. On success it is designed to return an **FLV stream** for the time range.
-- **On this unit (FW 3.2.2.6F), `mode=time` / `real` / `playback` and all parameters return 404.**
-  `cgi-bin/gw.cgi` also returns 404. It is a relic of the Flash era and is not included in this build.
-
-### Related Endpoints Usable for Configuration Retrieval
-
-All use `{DEV,VER,API,Parameter}` + Basic. **Use the following for configuration retrieval** (do not use the "SET-type templates" below):
-
-| Endpoint | Purpose |
-| --- | --- |
-| `POST /netsdk/Stat` | **Most important.** Returns device/HDD/IPC/recording state as real data |
-| `POST /netsdk/GetChannelDetail` | Resolution and details for 9 channels |
-| `POST /netsdk/Record` | Recording schedule |
-| `POST /netsdk/R.SEARCH.Ipc` | List of connected IPCs (ch0 = `192.0.2.146`) |
-| `POST /netsdk/LogSearch` | Log search (`SearchCnt:0` on this unit) |
-| `POST /login` | Authentication check |
-
-> **Unusable endpoints (caution)**: `/netsdk/Channel`, `/netsdk/General`,
-> `/netsdk/Stat/Storage`, etc. are **SET-type templates** that, for both GET/POST, merely echo `"$.<API>"` and return `"StatusCode":"ok"` / `"Save success"`; they cannot be used for configuration retrieval. For configuration retrieval, use `/netsdk/Stat` and `/netsdk/GetChannelDetail`.
-
-### Channel Configuration
-
-- **9-channel configuration (`MAX_CHN` = 9)**. Confirmed via `/netsdk/Stat` / `/netsdk/GetChannelDetail`.
-- **Only ch0 (UI display ch1) has a real camera connected**:
-  `Status:"Connect success"`, `BcamOnline:"True"`, `RecordingState:"1"`. The actual device is
-  **`192.0.2.146` WTW-IPC** (main 3840×2160 HEVC / 4Mbps, sub 800×448 HEVC / 512kbps). ch1–8 are not connected.
-- The **ch number for recording Items / `flv.cgi` is 0-based** (the UI adds 1 for display).
+- **Auth**: HTTP Basic only, `admin` / empty password (`Authorization: Basic <base64("admin:")>`).
+- **`R.SearchRecord`** body must use **full date-time strings** `YYYY-MM-DD HH:MM:SS` for `BeginTime`/`EndTime` (time-only / Unix-second / empty `Parameter` → `Search Failed!`). Do **not** include `Reload:"True"`. `Channel` is a 9-element boolean array (`MAX_CHN`); `Type` is `{Timing,Motion,Alarm,Manual}`. The DVR clock matches the host (no offset correction).
+- **Success item shape**: `{ Channel:"0"(0-based string), TimeStart, TimeEnd (Unix sec), Type (bitmask 1/2/4/8) }`.
+- **`flv.cgi`**: `GET /cgi-bin/flv.cgi?u=&p=&mode=time&chn=<0-based>&begin=<UnixSec>&end=<UnixSec>&…` → FLV stream on success.
+- **Status endpoints**: `POST /netsdk/Stat` (HDD/IPC/recording state), `/netsdk/GetChannelDetail`, `/netsdk/R.SEARCH.Ipc`, `/login`. The legacy `DVR_DEV` / `DVR_VER` / `DVR_MAX_CHN` env vars apply only here.
 
 ---
 
-## Why You Can't Download Directly from the DVR (Conclusions from On-Device Testing)
+## Why the On-Hand Unit Cannot Be Used (Conclusions from On-Device Testing)
 
-On the `.14` DVR (WTW-EG2 series, FW 3.2.2.6F / 2022), **there is currently no path to reproduce "recording search → download" over HTTP**. Diagnostic results:
+Neither backend is proven on the only physically available device — the `.14` DVR (Tsukamoto Musen OEM, WTW-EG2 series, FW 3.2.2.6F / 2022). Diagnostic results:
 
-1. **Connectivity and authentication are OK.** 200 with Basic `admin:` (empty PW) (wrong PW gives 401).
-2. **`R.SearchRecord` always returns 0 items even with a success response.** Setting `BeginTime`/`EndTime` to full date-times yields `Search Success!`, but for the entire period and all `Channel`/`Type` values it returns `ReadCnt:"0"`, no `Item`, and `DataBasePath:"$"` (unresolved). **0 items despite the 2TB HDD being 100% used and recording in progress** = this netsdk search API does not return the recording index (most likely a firmware implementation constraint/bug). `LogSearch` also returns `SearchCnt:0`.
-3. **`cgi-bin/flv.cgi` returns 404 for every parameter.** The top of the Web UI uses a legacy design that plays via `swfobject.js` (Flash) + ActiveX OCX (`dvr_ocx.OpenStream`), and the actual recording playback/download is a **Windows / IE-only OCX binary-over-HTTP protocol** (not reproducible with `curl`/`ffmpeg`).
-4. **The only open ports are 80 and UDP 3702 (WS-Discovery).** RTSP(554) / SDK(37777, etc.) / RTMP(1935) / ONVIF HTTP are all closed or 404.
-   - ONVIF (Profile G) is a possibility since UDP 3702 is open, but there is no response to unicast WS-Discovery Probe, and `/onvif/*` all return 404 on port 80. Making it practical requires additional investigation such as obtaining XAddrs via multicast 3702, and it is not yet established.
+1. **Connectivity and auth are OK.** 200 with Basic `admin:` (empty PW) (wrong PW → 401).
+2. **netsdk `R.SearchRecord` always returns 0 items** even on a `Search Success!` response — `ReadCnt:"0"`, no `Item`, `DataBasePath:"$"` (unresolved) — across the entire period and all `Channel`/`Type`, despite a 2TB HDD 100% used and recording in progress. `LogSearch` also returns `SearchCnt:0`. Likely a firmware implementation constraint/bug.
+3. **`cgi-bin/flv.cgi` returns 404 for every parameter.** Recording playback/download on this unit is a Windows / IE-only OCX (`dvr_ocx.OpenStream`) binary-over-HTTP protocol, not reproducible with `curl`/`ffmpeg`.
+4. **Only ports 80 and UDP 3702 (WS-Discovery) are open.** RTSP(554) / SDK(37777) / RTMP(1935) are closed. **Crucially, ONVIF over HTTP does not work here either: `/onvif/*` returns 404 on port 80, and the unit does not answer unicast WS-Discovery Probe** — so the ONVIF Profile G client cannot reach it. Making it practical would require obtaining XAddrs via multicast 3702, which is not established.
 
-**→ Adopted alternative (proven)**: The **source camera `192.0.2.146` (WTW-IPC)** behind DVR ch0 has **RTSP operation confirmed by actual retrieval via ffprobe** on ports 80 + 554:
-
-- `rtsp://${RTSP_USER}:${RTSP_PASS}@192.0.2.146:554/ch0_0.264` (main HEVC 3840×2160 + PCM_alaw audio)
-- `rtsp://${RTSP_USER}:${RTSP_PASS}@192.0.2.146:554/ch0_1.264` (sub HEVC 800×448)
-
-The existing go2rtc-viewer go2rtc live viewer also uses the same `.146` RTSP. This recording feature **segment-records this `.146` RTSP with `ffmpeg`, accumulates it in `recordings/`, and provides its own search/playback UI**. If you want to extract **the actual recording files inside the DVR**, use the **vendor's native client on a real Windows machine / IE + OCX** (because this firmware's netsdk search / `flv.cgi` download do not work).
+**→ This is why the ONVIF client ships as documented best-effort.** It is a spec-compliant implementation with mechanical unit tests (PasswordDigest test vector, SOAP envelope render, response parser on canned ONVIF XML, Fault→typed-error), but it has not been validated against a real Profile G NVR/DVR. If your device is a conformant Profile G recorder, point `ONVIF_HOST` at it and it should work; if it 404s on `/onvif/*` like the on-hand unit, fall back to manually segment-capturing the source camera's RTSP with `ffmpeg` (this repository does not include a recorder), or use the vendor's native client.
 
 ---
 
 ## Troubleshooting
 
-### The recording list is empty (direct DVR search returns 0 items)
+### The recording list is empty (ONVIF)
 
-- **This is the (known) behavior of this unit.** `R.SearchRecord` always returns 0 items even with a success response
-  (see [Conclusions](#why-you-cant-download-directly-from-the-dvr-conclusions-from-on-device-testing)). There is no way to extract recordings from this unit over HTTP. If you want to retain recordings, manually capture the camera's RTSP with `ffmpeg` as described in the Overview (this repository does not include a recorder).
-- If you only want to check DVR status, use `/netsdk/Stat` (Web UI / `download-cli.js`) and see whether HDD/IPC/recording state is returned as real data.
+- Confirm `RECORDINGS_BACKEND=onvif` and that `ONVIF_HOST` points at a real Profile G NVR/DVR.
+- Check `/api/health` (Web UI or `download-cli.js`): it reports reachability, the chosen auth scheme, device time/skew, and discovered XAddrs. A reachable device with 0 recordings vs. an unreachable/unrecognized response are distinguished (the backend surfaces a diagnostic rather than a phantom empty list).
+- A `404` on `/onvif/*` means the device does not implement ONVIF over HTTP (like the on-hand unit) — see [above](#why-the-on-hand-unit-cannot-be-used-conclusions-from-on-device-testing).
 
-### `Search Failed!` (RetCode: -1) is returned
+### `NotAuthorized` / `Sender not authorized` (ONVIF)
 
-- Check the **date-time format**: `BeginTime`/`EndTime` must be a **full date-time `YYYY-MM-DD HH:MM:SS`**.
-  Time-only, Unix seconds, and an empty `Parameter` all fail.
-- Check that you are **not including** `Reload:"True"` (it fails if included).
+- Almost always **clock skew** or a wrong password. The client measures skew via `GetSystemDateAndTime` and tries the WS-Security → HTTP-Digest → Basic ladder, but verify `ONVIF_USER` / `ONVIF_PASS` match the device.
 
-### `flv.cgi` returns 404 (direct DVR download is not possible)
+### Wrong host/port in discovered service URLs
 
-- **This is also the (known) behavior of this unit.** `flv.cgi` returns 404 for all modes and all parameters.
-  On this unit, recordings cannot be extracted from the DVR over HTTP.
+- Some devices advertise their own/NAT-wrong host in `GetServices` XAddrs. By default the client rewrites advertised XAddrs onto the configured `host:port`. Set `ONVIF_HONOR_XADDR=true` only if your deployment needs the advertised host as-is.
 
-### Manual ffmpeg capture does not work
+### Export is slow / takes as long as the clip duration
 
-This repository has no automatic recording feature. Diagnostics for manual `ffmpeg` capture as described in the Overview:
+- This is the **real-time pacing** limitation of approach (A): if the device paces at 1× the export runs in real time. Keep windows short for scrubbing; for fast long exports, the hand-rolled `Rate-Control: no` approach (B) is documented but not built by default.
 
-- Check that `ffmpeg` is on the PATH with `command -v ffmpeg` (if not, run `brew install ffmpeg`).
-- Check that the source camera is reachable:
+### Legacy netsdk: `Search Failed!` / `flv.cgi` 404
 
-  ```sh
-  ping 192.0.2.146
-  ffprobe "rtsp://${RTSP_USER}:${RTSP_PASS}@192.0.2.146:554/ch0_0.264"
-  ```
-
-  If stream information (HEVC / resolution) appears, the recording source is delivering.
-- Check that you are on the same LAN (a VPN / different segment makes it unreachable), and that the authentication (`admin` / empty / port 554) matches the real device.
-- Check write permissions and free space for the output destination `recordings/`.
-
-### 401 Unauthorized (DVR)
-
-- Check that `DVR_USER` / `DVR_PASS` match the real device. **Once you set a password**, pass it via the `DVR_PASS` environment variable (wrong PW / no PW gives 401; only `admin:` empty gives 200).
+- See [Legacy netsdk/flv.cgi Fallback](#legacy-netsdkflvcgi-fallback): `BeginTime`/`EndTime` must be full date-times, don't include `Reload:"True"`. On the on-hand unit both symptoms are the known, unfixable behavior.
 
 ### Port 3914 conflicts
 
@@ -396,29 +325,29 @@ lsof -i :3914
 
 This project assumes **personal use within a LAN**. Be sure to observe the following.
 
-### 1. DVRs / cameras with no password set are dangerous
+### 1. NVR/DVRs / cameras with no password set are dangerous
 
-The DVR (`192.0.2.14`) and the source camera (`192.0.2.146`) run with **`admin` / empty password**. This means:
+If the NVR/DVR or source camera runs with **`admin` / empty password**:
 
 - From the same LAN (and, if misconfigured to be externally exposed, from the internet), **anyone can peek at the video/recordings and change settings**.
 - There is a serious risk of leaking your home's privacy to third parties.
 
-👉 **Be sure to set a strong, hard-to-guess password from the DVR / camera management screen (strongly recommended).** After setting it, update this feature's `DVR_PASS` environment variable (and the RTSP URL on the go2rtc side). **Do not hard-code the password into the source code.**
+👉 **Be sure to set a strong, hard-to-guess password from the device's management screen (strongly recommended).** After setting it, update this feature's `ONVIF_PASS` (or `DVR_PASS`) environment variable (and the RTSP URL on the go2rtc side). **Do not hard-code the password into the source code.**
 
 ### 2. Manage credentials via environment variables
 
-- Pass the connection target and credentials via the **environment variables** `DVR_HOST` / `DVR_USER` / `DVR_PASS` (plus `BIND_ADDR` / `PORT`). **Do not commit** files containing secret values.
+- Pass the connection target and credentials via the **environment variables** `ONVIF_HOST` / `ONVIF_USER` / `ONVIF_PASS` (legacy `DVR_*` still honored), plus `BIND_ADDR` / `PORT`. **Do not commit** files containing secret values — they live only in the gitignored `.env`.
 - The **recording outputs (clips, thumbnails, cache) in this directory are `.gitignore`-d**. Since recordings contain video, be careful not to accidentally include them in a public repository.
 
 ### 3. Do not expose to the internet
 
-- The recording server (`3914`) and the DVR / camera are intended **for LAN-only access**.
+- The recordings server (`3914`) and the NVR/DVR / camera are intended **for LAN-only access**.
 - **Do not expose `3914` / `80` / `554`, etc. externally via router port forwarding or UPnP.**
-- It is recommended to run the recording server limited to localhost (`127.0.0.1:3914`). Even when you want to view it from other devices on the LAN, limit it to a trusted network and protect it with a firewall. When away from home, use a VPN.
+- It is recommended to run the recordings server limited to localhost (`127.0.0.1:3914`). Even when you want to view it from other devices on the LAN, limit it to a trusted network and protect it with a firewall. When away from home, use a VPN.
 
 ### 4. Verify P2P / cloud transmission
 
-- Many Chinese-made DVRs / IP cameras (including WTW-IPC / XVR) come with **P2P / cloud features** that, depending on settings, may transmit video and connection information to the manufacturer's servers.
+- Many consumer NVR/DVRs / IP cameras come with **P2P / cloud features** that, depending on settings, may transmit video and connection information to the manufacturer's servers.
 - It is strongly recommended to **disable P2P / cloud / remote access features from the management screen** and block unnecessary external communication. If possible, block the device's internet-bound traffic at the router and **isolate it within the LAN**.
 
 ---
@@ -427,13 +356,14 @@ The DVR (`192.0.2.14`) and the source camera (`192.0.2.146`) run with **`admin` 
 
 | File / Directory | Role |
 | --- | --- |
-| `recordings/server.js` | Recording backend (DVR API client + static-serving server). Node standard only |
-| `recordings/download-cli.js` | CLI for searching/downloading DVR recordings (`--help` / `--list` / `--chn`) |
-| `recordings/public/` | Recording UI (search form, list, player: `recordings.html` / `.css` / `.js`) |
-| `recordings/data/` | Runtime output for recordings/clips, etc. (MP4 / thumbnails / index). `.gitignore`-d |
+| `recordings/server.js` | Recordings backend (backend selector + ffmpeg remux + static-serving server). Node standard only |
+| `recordings/onvif.js` | ONVIF Profile G client (SOAP / WS-Security / Recording-Search / Replay-Control / Device-Management). Standard-library only, no deps |
+| `recordings/download-cli.js` | CLI for searching/downloading recordings (`--help` / `--list` / `--chn`) |
+| `recordings/public/` | Recordings UI (search form, list, player: `recordings.html` / `.css` / `.js` / `i18n.js`) |
+| `recordings/data/` | Runtime output for exported clips, etc. (MP4 / cache / index). `.gitignore`-d |
 | `recordings/README.md` | This document |
 
-> The output directory name (`data/`, etc.) follows the implementation of `server.js`. **Runtime outputs** such as recording clips, thumbnails, cache, and PID/logs are **`.gitignore`-d**, and only the source (`server.js` / `web/` / this README) is tracked.
+> The output directory name (`data/`, etc.) follows the implementation of `server.js`. **Runtime outputs** such as recording clips, thumbnails, cache, and PID/logs are **`.gitignore`-d**, and only the source (`server.js` / `onvif.js` / `public/` / this README) is tracked.
 
 ---
 

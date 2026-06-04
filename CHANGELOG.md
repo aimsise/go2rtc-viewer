@@ -5,6 +5,23 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+
+- **Recordings backend rebuilt on ONVIF Profile G** (vendor-neutral recording search + replay) as the new default, replacing the DVR-specific netsdk/`flv.cgi` framing. Flow: `GetSystemDateAndTime` → `GetServices` → `FindRecordings`/`GetRecordingSearchResults` → `GetReplayUri` → `ffmpeg -c copy` → MP4. A self-contained Profile G client (`recordings/onvif.js`, standard-library only — SOAP/WS-Security/HTTP-Digest via `node:crypto`, no npm deps) handles the protocol; `server.js` keeps the existing ffmpeg remux/teardown leg and only swaps its source step.
+- **Backend selector** `RECORDINGS_BACKEND=onvif|netsdk` (default `onvif`). The legacy netsdk/`flv.cgi` path is **retained as an opt-in fallback** (`RECORDINGS_BACKEND=netsdk`), not deleted, so other firmware/models keep a working-shaped client.
+- **Environment**: new `ONVIF_HOST` / `ONVIF_USER` / `ONVIF_PASS` (plus optional `ONVIF_DEVICE_PATH` / `ONVIF_PORT` / `ONVIF_HONOR_XADDR`). `DVR_*` (and `DVR_DEV` / `DVR_VER` / `DVR_MAX_CHN`) are **still honored as a legacy fallback** when the `ONVIF_*` equivalents are unset (preserving the `DVR_PASS=''` empty-password semantics), so existing `.env` files keep working with no migration.
+- **UI label**: the recorder source reads `DVR / NVR (ONVIF)` (was `DVR (XVR)`); the source badge now also matches `onvif`. i18n key names are unchanged.
+
+### Unchanged
+
+- **Frontend HTTP contract is unchanged**: the `/api/recordings/*` endpoints (`health` / `channels` / `search` / `clip.mp4` / `download`) keep their existing request/response shapes, so `recordings/public/*` needs only label tweaks (no logic change). `recordings.html`'s same-origin CSP is unaffected (ONVIF/SOAP/RTSP traffic is entirely server-side).
+
+### Notes
+
+- **Still best-effort and unverified against real ONVIF Profile G hardware.** The only on-hand unit 404s on `/onvif/*` and does not answer unicast WS-Discovery Probe, so the client is a spec-compliant implementation with mechanical unit tests (PasswordDigest vector, SOAP envelope render, response parser, Fault→typed-error) rather than a hardware-validated one. Approach (A) (vendor `starttime`/`endtime` query params on the replay RTSP URI + ffmpeg `-c copy`) is real-time-paced; approach (B) (hand-rolled RTSP `Range: clock=` + `Rate-Control: no`) is documented as the fast-export fallback. go2rtc is deliberately not used for replay (it cannot inject the ONVIF replay RTSP headers).
+
 ## [1.0.0] - 2026-06-04
 
 First public release. LAN-only security-camera viewer that transcodes H.265 (HEVC) cameras to H.264 via go2rtc + ffmpeg and plays them in the browser over WebRTC. Works with any RTSP-capable IP camera. Vanilla JS, no build tools, no framework, no npm dependencies. Developed and tested on macOS (Apple Silicon / arm64).
@@ -40,4 +57,5 @@ First public release. LAN-only security-camera viewer that transcodes H.265 (HEV
 - **Platform**: macOS (Apple Silicon / arm64) only. Requires `ffmpeg` on PATH and Node.js (for the recordings backend); go2rtc is downloaded at runtime and not bundled.
 - go2rtc (MIT) and FFmpeg (LGPL/GPL) are used as external binaries — downloaded/invoked at runtime, not bundled or redistributed.
 
+[Unreleased]: https://github.com/aimsise/go2rtc-viewer/compare/v1.0.0...HEAD
 [1.0.0]: https://github.com/aimsise/go2rtc-viewer/releases/tag/v1.0.0

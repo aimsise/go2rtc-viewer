@@ -498,7 +498,7 @@ function renderResultBar(payload, items, range) {
   els.resultSource.classList.remove('result-source--dvr', 'result-source--local');
   if (source) {
     const s = String(source).toLowerCase();
-    if (s.includes('dvr') || s.includes('xvr') || s.includes('netsdk')) {
+    if (s.includes('dvr') || s.includes('xvr') || s.includes('netsdk') || s.includes('onvif')) {
       els.resultSource.textContent = window.i18n.t('rec.source.dvr');
       els.resultSource.classList.add('result-source--dvr');
     } else if (s.includes('local') || s.includes('rtsp') || s.includes('ffmpeg')) {
