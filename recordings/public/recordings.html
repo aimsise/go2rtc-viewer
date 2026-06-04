@@ -1,0 +1,253 @@
+<!DOCTYPE html>
+<html lang="en" data-title-key="rec.page.title">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <meta name="color-scheme" content="dark" />
+  <meta name="robots" content="noindex, nofollow" />
+  <!--
+    Content-Security-Policy（多層防御）。録画バックエンド(:3914)と同一オリジンのみ参照。
+    ?api= で別ホストの録画バックエンドに向ける場合は、そのオリジンを connect-src /
+    media-src / img-src に追記すること。クリックジャック対策の frame-ancestors は
+    HTTP ヘッダ専用（meta では無効）のため、recordings/server.js が X-Frame-Options
+    で対応する。
+  -->
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; media-src 'self' blob:; connect-src 'self'; base-uri 'self'; object-src 'none'; form-action 'self'" />
+  <title data-i18n="rec.page.title">録画 検索・閲覧 — 防犯カメラ</title>
+  <link rel="stylesheet" href="./recordings.css" />
+</head>
+<body>
+  <header class="app-header">
+    <div class="brand">
+      <span class="brand-dot" aria-hidden="true"></span>
+      <h1 class="brand-title" data-i18n="rec.header.title">録画 検索・閲覧</h1>
+      <span class="brand-sub" data-i18n="rec.header.subtitle">DVR (XVR) / LAN内専用</span>
+    </div>
+    <div class="header-actions">
+      <a class="btn btn--ghost" href="../../web/index.html" title="ライブ映像ビューアを開く" data-i18n-title="rec.header.live.title">
+        <span class="btn-icon" aria-hidden="true">◉</span>
+        <span class="btn-text" data-i18n="rec.header.live.label">ライブ視聴</span>
+      </a>
+      <span id="conn-status" class="conn-status conn-status--unknown" title="録画バックエンド接続状態" data-i18n-title="rec.connStatus.title">
+        <span class="conn-dot" aria-hidden="true"></span>
+        <span class="conn-label" data-i18n="common.connStatus.checking">接続確認中…</span>
+      </span>
+      <div class="lang-switch" role="group" aria-label="言語 / Language">
+        <button type="button" class="lang-btn" data-lang="ja" aria-pressed="false">日本語</button>
+        <button type="button" class="lang-btn" data-lang="en" aria-pressed="true">EN</button>
+      </div>
+    </div>
+  </header>
+
+  <main class="app-main">
+    <!-- ── 検索パネル ─────────────────────────────────── -->
+    <section class="search-panel" aria-label="録画検索条件">
+      <form id="search-form" class="search-form">
+        <div class="field field--date">
+          <label class="field-label" for="date-input" data-i18n="rec.search.date.label">日付</label>
+          <input
+            id="date-input"
+            class="field-input"
+            type="date"
+            required
+            autocomplete="off"
+          />
+        </div>
+
+        <div class="field field--time">
+          <label class="field-label" for="begin-input" data-i18n="rec.search.begin.label">開始時刻</label>
+          <input
+            id="begin-input"
+            class="field-input"
+            type="time"
+            step="1"
+            value="00:00:00"
+            autocomplete="off"
+          />
+        </div>
+
+        <div class="field field--time">
+          <label class="field-label" for="end-input" data-i18n="rec.search.end.label">終了時刻</label>
+          <input
+            id="end-input"
+            class="field-input"
+            type="time"
+            step="1"
+            value="23:59:59"
+            autocomplete="off"
+          />
+        </div>
+
+        <div class="field field--channels">
+          <span class="field-label" id="channels-label" data-i18n="rec.search.channels.label">チャンネル</span>
+          <div
+            id="channel-chips"
+            class="channel-chips"
+            role="group"
+            aria-labelledby="channels-label"
+          >
+            <!-- チャンネルチップは recordings.js が生成する -->
+            <span class="channel-chips-loading" data-role="chips-loading" data-i18n="rec.search.chips.loading">読込中…</span>
+          </div>
+        </div>
+
+        <div class="field field--types">
+          <span class="field-label" id="types-label" data-i18n="rec.search.types.label">録画種別</span>
+          <div
+            id="type-chips"
+            class="type-chips"
+            role="group"
+            aria-labelledby="types-label"
+          >
+            <label class="chip chip--type">
+              <input type="checkbox" value="Timing" checked />
+              <span data-i18n="rec.type.timing">定時</span>
+            </label>
+            <label class="chip chip--type">
+              <input type="checkbox" value="Motion" checked />
+              <span data-i18n="rec.type.motion">動体</span>
+            </label>
+            <label class="chip chip--type">
+              <input type="checkbox" value="Alarm" checked />
+              <span data-i18n="rec.type.alarm">アラーム</span>
+            </label>
+            <label class="chip chip--type">
+              <input type="checkbox" value="Manual" checked />
+              <span data-i18n="rec.type.manual">手動</span>
+            </label>
+          </div>
+        </div>
+
+        <div class="field field--actions">
+          <button id="search-btn" type="submit" class="btn btn--primary">
+            <span class="btn-icon" aria-hidden="true">⌕</span>
+            <span class="btn-text" data-i18n="rec.search.submit">検索</span>
+          </button>
+          <button id="today-btn" type="button" class="btn btn--ghost" title="今日の日付に設定" data-i18n-title="rec.search.today.title" data-i18n="rec.search.today.label">
+            今日
+          </button>
+        </div>
+      </form>
+    </section>
+
+    <!-- ── 結果メタ情報バー ──────────────────────────── -->
+    <div id="result-bar" class="result-bar" hidden>
+      <span id="result-summary" class="result-summary"></span>
+      <span id="result-source" class="result-source" data-role="source"></span>
+    </div>
+
+    <!-- ── タイムライン ──────────────────────────────── -->
+    <section
+      id="timeline-section"
+      class="timeline-section"
+      aria-label="録画タイムライン"
+      hidden
+    >
+      <div class="timeline-head">
+        <span class="timeline-title" data-i18n="rec.timeline.title">タイムライン</span>
+        <div class="timeline-legend" aria-hidden="true">
+          <span class="legend-item"><i class="legend-swatch legend-swatch--timing"></i><span data-i18n="rec.type.timing">定時</span></span>
+          <span class="legend-item"><i class="legend-swatch legend-swatch--motion"></i><span data-i18n="rec.type.motion">動体</span></span>
+          <span class="legend-item"><i class="legend-swatch legend-swatch--alarm"></i><span data-i18n="rec.type.alarm">アラーム</span></span>
+          <span class="legend-item"><i class="legend-swatch legend-swatch--manual"></i><span data-i18n="rec.type.manual">手動</span></span>
+        </div>
+      </div>
+      <div id="timeline" class="timeline" role="list" aria-label="チャンネル別タイムライン">
+        <!-- recordings.js がチャンネル行を生成 -->
+      </div>
+      <div class="timeline-axis" id="timeline-axis" aria-hidden="true">
+        <!-- 時刻目盛り -->
+      </div>
+    </section>
+
+    <!-- ── 状態表示（ローディング / エラー / 空） ──────── -->
+    <div id="status-panel" class="status-panel" role="status" aria-live="polite" hidden>
+      <div class="status-spinner" data-role="spinner" hidden aria-hidden="true"></div>
+      <p class="status-title" data-role="status-title"></p>
+      <p class="status-desc" data-role="status-desc"></p>
+    </div>
+
+    <!-- ── 録画リスト ────────────────────────────────── -->
+    <section
+      id="list-section"
+      class="list-section"
+      aria-label="録画リスト"
+      hidden
+    >
+      <div class="list-head" role="row" aria-hidden="true">
+        <span class="col col-ch" data-i18n="rec.list.col.ch">ch</span>
+        <span class="col col-start" data-i18n="rec.list.col.start">開始</span>
+        <span class="col col-end" data-i18n="rec.list.col.end">終了</span>
+        <span class="col col-dur" data-i18n="rec.list.col.dur">長さ</span>
+        <span class="col col-type" data-i18n="rec.list.col.type">種別</span>
+        <span class="col col-size" data-i18n="rec.list.col.size">サイズ</span>
+        <span class="col col-act" data-i18n="rec.list.col.act">操作</span>
+      </div>
+      <div id="record-list" class="record-list" role="list" aria-label="録画一覧">
+        <!-- recordings.js が行を生成 -->
+      </div>
+    </section>
+  </main>
+
+  <!-- ── 再生モーダル ─────────────────────────────────── -->
+  <div id="player-modal" class="player-modal" hidden aria-hidden="true" role="dialog" aria-modal="true" aria-labelledby="player-title">
+    <div class="player-backdrop" data-role="backdrop"></div>
+    <div class="player-dialog" role="document">
+      <div class="player-bar">
+        <span id="player-title" class="player-title"></span>
+        <div class="player-actions">
+          <a id="player-download" class="btn btn--icon" download href="#" title="この録画をダウンロード" data-i18n-title="rec.player.download.title">
+            <span class="btn-icon" aria-hidden="true">⤓</span>
+            <span class="btn-text" data-i18n="rec.player.download.label">ダウンロード</span>
+          </a>
+          <button id="player-close" type="button" class="btn btn--icon" title="閉じる" data-i18n-title="rec.player.close.title">
+            <span class="btn-icon" aria-hidden="true">✕</span>
+            <span class="btn-text" data-i18n="rec.player.close.label">閉じる</span>
+          </button>
+        </div>
+      </div>
+      <div class="player-video-wrap">
+        <video
+          id="player-video"
+          class="player-video"
+          controls
+          playsinline
+          preload="auto"
+        ></video>
+        <div class="player-overlay" data-role="player-overlay" hidden>
+          <span class="player-overlay-text" data-role="player-overlay-text"></span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── 録画リスト行テンプレート ─────────────────────── -->
+  <template id="record-row-template">
+    <div class="record-row" role="listitem">
+      <span class="col col-ch" data-role="ch"></span>
+      <span class="col col-start" data-role="start"></span>
+      <span class="col col-end" data-role="end"></span>
+      <span class="col col-dur" data-role="dur"></span>
+      <span class="col col-type" data-role="type"></span>
+      <span class="col col-size" data-role="size"></span>
+      <span class="col col-act">
+        <button type="button" class="btn btn--sm" data-role="play" title="この録画を再生" data-i18n-title="rec.row.play.title">
+          <span class="btn-icon" aria-hidden="true">▷</span>
+          <span class="btn-text" data-i18n="rec.row.play.label">再生</span>
+        </button>
+        <a class="btn btn--sm btn--ghost" data-role="download" download href="#" title="MP4 でダウンロード" data-i18n-title="rec.row.download.title">
+          <span class="btn-icon" aria-hidden="true">⤓</span>
+          <span class="btn-text" data-i18n="rec.row.download.label">DL</span>
+        </a>
+      </span>
+    </div>
+  </template>
+
+  <footer class="app-footer">
+    <span id="footer-note" data-i18n="rec.footer.note">録画は DVR (XVR) / ローカル録画から取得。LAN 内専用・インターネット非公開。</span>
+  </footer>
+
+  <script src="./i18n.js"></script>
+  <script type="module" src="./recordings.js"></script>
+</body>
+</html>
