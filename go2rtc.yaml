@@ -1,0 +1,54 @@
+# go2rtc configuration for the local camera viewer.
+# Docs: https://github.com/AlexxIT/go2rtc
+#
+# Works with any RTSP-capable IP camera. If a camera streams H.265 (HEVC), which
+# browsers cannot play natively, we use the built-in ffmpeg module to transcode
+# H.265 -> H.264. ffmpeg must be resolvable on PATH (`command -v ffmpeg`).
+
+api:
+  # Bind to localhost only by default (safe default: the no-auth go2rtc API is
+  # not reachable from other LAN hosts). To view from another device on the LAN,
+  # change this to ":1984" (all interfaces) AND firewall it — never port-forward
+  # it to the internet. See README "セキュリティ警告".
+  listen: "127.0.0.1:1984"   # go2rtc Web UI + API (http://localhost:1984)
+  # Allow the custom dashboard (served from a different origin/port, e.g. a
+  # static server on :8000) to call the API, load video-stream.js, open the
+  # api/ws WebSocket and fetch api/frame.jpeg. Without this, browsers block
+  # those cross-origin requests (no Access-Control-Allow-Origin header) and the
+  # viewer shows "go2rtc 未接続". Only "*" is supported. LAN-only use.
+  origin: "*"            # emit Access-Control-Allow-Origin: * for the viewer
+
+webrtc:
+  listen: ":8555"        # WebRTC TCP/UDP for low-latency browser playback
+
+log:
+  level: info            # disabled | trace | debug | info | warn | error
+  format: ""             # "" autodetect color | color | json | text
+  output: stdout         # stderr | stdout
+
+streams:
+  # Define one stream per camera. Replace the host / credentials / RTSP path with
+  # your camera's values, or resolve them from .env via ${VAR} (start.sh exports
+  # .env before launching go2rtc; ${VAR} with no value resolves to empty).
+  #
+  # Cameras usually expose a high-res "main" stream and a low-res "sub" stream at
+  # vendor-specific RTSP paths. Set CAM_PATH_SUB / CAM_PATH_HD in .env, e.g.:
+  #   ONVIF / generic : /stream2                      /stream1
+  #   Hikvision       : /Streaming/Channels/102       /Streaming/Channels/101
+  #   Dahua           : /cam/realmonitor?channel=1&subtype=1   ...&subtype=0
+  #
+  # If your camera streams H.265 (HEVC) — which browsers cannot play natively —
+  # keep the `ffmpeg:...#video=h264` transcode below. If it already streams
+  # H.264, you can point go2rtc straight at `rtsp://...` (no transcode, less CPU).
+
+  # Default lightweight view (sub stream). #audio=pcma is optional — keep it only
+  # if your camera sends PCMA/G.711 audio; drop or change it otherwise.
+  cam1: ffmpeg:rtsp://${RTSP_USER}:${RTSP_PASS}@${CAM_IP}:554/${CAM_PATH_SUB}#video=h264#audio=pcma
+
+  # High-definition view (main stream), video only. We list ONLY the H.264
+  # transcode (not the raw HEVC) so every consumer (WebRTC / MSE / HLS / mp4)
+  # receives H.264 — a raw-HEVC source would be handed to MSE and fail to decode.
+  cam1_hd: ffmpeg:rtsp://${RTSP_USER}:${RTSP_PASS}@${CAM_IP}:554/${CAM_PATH_HD}#video=h264
+
+  # Add more cameras by copying the two lines above as cam2 / cam2_hd, etc., each
+  # with its own host/credentials/paths (and a matching entry in cameras.json).

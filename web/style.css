@@ -1,0 +1,998 @@
+/* 防犯カメラ ビューア — ダークテーマ ダッシュボード
+   デザイン: "NVR オペレーションコンソール / リファインド・グラス"
+   - 3階層の半透明ガラス面（backdrop-filter）＋ @supports 不可環境向け不透明フォールバック
+   - 各操作を「アイコン＋日本語ラベル＋ツールチップ」で自己説明的に（Goal 2）
+   - 既存の ID / クラス / data-role フックは一切変更せず、追加要素・擬似要素のみで装飾（デグレ防止）
+*/
+
+:root {
+  /* ── 背景 & エレベーション（ガラス＋不透明フォールバック） ── */
+  --bg:            #0b0e14;                    /* ページ地（旧 #0d1117 より深く） */
+  --bg-grad-top:   rgba(40, 72, 128, 0.40);   /* 右上のキャンバスグロー */
+  --bg-grad-bot:   rgba(34, 52, 92, 0.26);    /* 左下のキャンバスグロー */
+  --bg-video:      #04060a;                    /* 映像レターボックス */
+
+  --surface-1:     rgba(22, 28, 38, 0.72);    /* ヘッダ/フッタ/ペイン本体 */
+  --surface-2:     rgba(28, 36, 50, 0.80);    /* ペインバー/ドロップダウン/ゴースト操作 */
+  --surface-3:     rgba(40, 50, 68, 0.88);    /* ホバー時の操作/浮いたチップ */
+  --surface-1-solid: #141a23;                  /* @supports フォールバック */
+  --surface-2-solid: #1b2330;
+  --surface-3-solid: #232d3b;
+  --bg-elev:       var(--surface-1-solid);     /* 旧トークン別名（保持） */
+  --bg-elev-2:     var(--surface-2-solid);     /* 旧トークン別名（保持） */
+
+  /* ── 罫線 / ヘアライン ── */
+  --border:        rgba(255, 255, 255, 0.11);  /* 主要操作の罫線 */
+  --border-soft:   rgba(255, 255, 255, 0.06);  /* 区切りヘアライン */
+  --border-strong: rgba(255, 255, 255, 0.18);  /* ホバー時の罫線 */
+  --hairline-top:  rgba(255, 255, 255, 0.07);  /* ガラス上端の光 */
+
+  /* ── テキスト（3階調） ── */
+  --text:          #eef3f9;   /* 第1 */
+  --text-dim:      #a2b1c2;   /* 第2 / ラベル */
+  --text-faint:    #66758a;   /* 第3 / ヒント・キャプション */
+
+  /* ── アクセント（操作の青） ── */
+  --accent:        #3b8eff;
+  --accent-hover:  #57a0ff;
+  --accent-weak:   rgba(59, 142, 255, 0.16);
+  --accent-ring:   rgba(59, 142, 255, 0.55);   /* フォーカスリング */
+  --accent-glow:   0 2px 10px rgba(59, 142, 255, 0.40);
+
+  /* ── セマンティック ── */
+  --ok:    #3fb950;  --ok-weak:    rgba(63, 185, 80, 0.16);
+  --warn:  #d8a629;  --warn-weak:  rgba(216, 166, 41, 0.16);
+  --error: #f4564d;  --error-weak: rgba(244, 86, 77, 0.16);
+  --hd:    #f3a93c;  --hd-ink:     #1c1304;  --hd-weak: rgba(243, 169, 60, 0.16);
+  --live:  #ff3b3b;  --live-glow:  rgba(255, 59, 59, 0.55);  /* LIVE 専用の赤（error と別） */
+
+  /* ── ジオメトリ ── */
+  --radius:      14px;   /* ペイン/カード（旧名・再調整） */
+  --radius-md:   10px;   /* ドロップダウン/ボタン */
+  --radius-sm:   8px;    /* バッジ/チップ（旧名） */
+  --radius-xs:   6px;    /* 小チップ */
+  --radius-pill: 999px;
+
+  /* ── 影 / ぼかし ── */
+  --shadow:        0 8px 24px rgba(0, 0, 0, 0.45);                  /* 旧名 */
+  --shadow-pane:   0 8px 24px rgba(0, 0, 0, 0.45);
+  --shadow-pop:    0 18px 48px rgba(0, 0, 0, 0.58);
+  --shadow-inset:  inset 0 1px 0 var(--hairline-top);              /* ガラス上端の光 */
+  --blur-chrome:   14px;   /* ヘッダ/フッタ/ペイン背景 */
+  --blur-glass:    6px;    /* バッジ/オーバーレイ */
+
+  /* ── 余白スケール（4px 基準） ── */
+  --sp-1: 4px;  --sp-2: 8px;  --sp-3: 12px; --sp-4: 16px;
+  --sp-5: 20px; --sp-6: 24px; --sp-8: 32px;
+  --gap: 18px;   /* グリッド間隔（旧名・保持） */
+
+  /* ── 文字サイズスケール ── */
+  --fs-xs:  11px;  --fs-cap: 11px;  --fs-sm: 12px;  --fs-md: 13px;
+  --fs-lg:  14px;  --fs-h2: 17px;   --fs-h1: clamp(16px, 2.4vw, 20px);
+
+  /* ── フォント（JP対応 + IP 用モノ） ── */
+  --font: -apple-system, BlinkMacSystemFont, "Segoe UI", "Hiragino Sans",
+          "Hiragino Kaku Gothic ProN", "Noto Sans JP", Meiryo, sans-serif;
+  --font-mono: ui-monospace, "SF Mono", "SFMono-Regular", Menlo, "Cascadia Code", monospace;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  background:
+    radial-gradient(1100px 560px at 80% -10%, var(--bg-grad-top) 0%, transparent 58%),
+    radial-gradient(900px 560px at 4% 110%, var(--bg-grad-bot) 0%, transparent 55%),
+    var(--bg);
+  color: var(--text);
+  font-family: var(--font);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+/* ── ガラス面の不透明フォールバック ─────────────────────
+   backdrop-filter 非対応環境では半透明だと背後が透けて可読性が落ちるため、
+   主要な面を不透明色に置き換える。 */
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  .app-header,
+  .app-footer,
+  .pane,
+  .conn-status,
+  .layout-switch,
+  .view-switch,
+  .lang-switch,
+  .cam-badge,
+  .cam-live,
+  .help-panel,
+  .cam-overlay-text { background: var(--surface-1-solid); }
+  .pane-bar,
+  .pane-select,
+  .btn { background: var(--surface-2-solid); }
+}
+
+/* ── ヘッダ ───────────────────────────────────────────── */
+
+.app-header {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  /* 両ページでヘッダの縦幅を揃える。ビューアは「画面分割」キャプション付きの
+     layout-group があり背が高いので、その高さ(=既定79px)を min-height の床にして、
+     layout-group を持たない管理ページも同じ高さに見えるようにする。
+     （border-box。env safe-area や狭幅での折返し時はこれを超えて伸びる＝床なので無害） */
+  min-height: 79px;
+  padding: 12px clamp(16px, 4vw, 32px);
+  padding-top: max(12px, env(safe-area-inset-top));
+  background: rgba(11, 14, 20, 0.82);
+  backdrop-filter: saturate(160%) blur(var(--blur-chrome));
+  -webkit-backdrop-filter: saturate(160%) blur(var(--blur-chrome));
+  border-bottom: 1px solid var(--border-soft);
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+/* ブランドのカメラ字形（旧 brand-dot を置換。緑ドットは状態灯と紛らわしいため） */
+.brand-mark {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 8px;
+  flex: none;
+  color: var(--accent);
+  background: var(--accent-weak);
+  border: 1px solid rgba(59, 142, 255, 0.30);
+}
+
+.brand-title {
+  margin: 0;
+  font-size: var(--fs-h1);
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  white-space: nowrap;
+}
+
+.brand-sub {
+  font-size: var(--fs-sm);
+  color: var(--text-faint);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.header-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex: none;
+}
+
+/* ── 画面分割セグメント（1/2/4/6） ─────────────────────
+   各ボタン = ミニグリッド字形 ＋ 数字 ＋「画面」＋ ツールチップ の4重表示で、
+   「何画面に分割するか」を一目で伝える（Goal 2 の中心）。 */
+
+.layout-group {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.layout-caption {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  color: var(--text-faint);
+  padding-left: 6px;
+}
+
+.layout-switch {
+  display: inline-flex;
+  align-items: stretch;
+  gap: 3px;
+  padding: 3px;
+  border-radius: var(--radius-pill);
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+  backdrop-filter: saturate(150%) blur(var(--blur-glass));
+  -webkit-backdrop-filter: saturate(150%) blur(var(--blur-glass));
+}
+
+.layout-btn {
+  appearance: none;
+  cursor: pointer;
+  font-family: var(--font);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: auto;
+  padding: 6px 11px;
+  border: 0;
+  border-radius: var(--radius-pill);
+  background: transparent;
+  color: var(--text-dim);
+  font-size: var(--fs-md);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+  transition: background 0.15s ease, color 0.15s ease;
+  user-select: none;
+}
+
+/* ミニグリッド字形（純 CSS の inline-grid。SVG/マスク不要で堅牢） */
+.lb-grid {
+  display: inline-grid;
+  gap: 1.5px;
+  width: 15px;
+  height: 15px;
+}
+.lb-grid--1 { grid-template: 1fr / 1fr; }
+.lb-grid--2 { grid-template: 1fr / 1fr 1fr; }
+.lb-grid--4 { grid-template: 1fr 1fr / 1fr 1fr; }
+.lb-grid--6 { grid-template: 1fr 1fr / repeat(3, 1fr); }
+.lb-grid i {
+  background: currentColor;
+  opacity: 0.5;
+  border-radius: 1.5px;
+}
+.lb-num { font-variant-numeric: tabular-nums; }
+.lb-word {
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--text-faint);
+}
+
+.layout-btn:hover {
+  color: var(--text);
+  background: rgba(255, 255, 255, 0.05);
+}
+.layout-btn:hover .lb-word { color: var(--text-dim); }
+
+.layout-btn:focus-visible {
+  outline: 2px solid var(--accent-ring);
+  outline-offset: 2px;
+}
+
+.layout-btn.is-active {
+  color: #fff;
+  background: var(--accent);
+  box-shadow: var(--accent-glow);
+}
+.layout-btn.is-active .lb-grid i { opacity: 1; }
+.layout-btn.is-active .lb-word { color: rgba(255, 255, 255, 0.85); }
+.layout-btn.is-active:hover { background: var(--accent-hover); }
+
+/* ── ビューア⇄管理 の切替セグメント（両ページ共通） ───────
+   .layout-switch と同じピル型セグメント。ビューア／管理ページの
+   ヘッダで「ビューア / 管理」を切替える。<a> ベースで JS フックなし。 */
+.view-switch {
+  display: inline-flex;
+  align-items: stretch;
+  gap: 3px;
+  padding: 3px;
+  border-radius: var(--radius-pill);
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+  backdrop-filter: saturate(150%) blur(var(--blur-glass));
+  -webkit-backdrop-filter: saturate(150%) blur(var(--blur-glass));
+}
+.view-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border-radius: var(--radius-pill);
+  color: var(--text-dim);
+  text-decoration: none;
+  font-size: var(--fs-md);
+  font-weight: 700;
+  line-height: 1;
+  transition: background 0.15s ease, color 0.15s ease;
+  user-select: none;
+}
+.view-link .vl-icon { display: inline-flex; }
+.view-link:hover { color: var(--text); background: rgba(255, 255, 255, 0.05); }
+.view-link:focus-visible { outline: 2px solid var(--accent-ring); outline-offset: 2px; }
+.view-link.is-active {
+  color: #fff;
+  background: var(--accent);
+  box-shadow: var(--accent-glow);
+}
+.view-link.is-active:hover { background: var(--accent-hover); }
+
+/* ── 言語切替（日本語 / EN）。view-switch と同じピル型セグメント。i18n.js が
+   .lang-btn[data-lang] のクリックで言語を切替え、aria-pressed を更新する。 ── */
+.lang-switch {
+  display: inline-flex;
+  align-items: stretch;
+  gap: 3px;
+  padding: 3px;
+  border-radius: var(--radius-pill);
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+  backdrop-filter: saturate(150%) blur(var(--blur-glass));
+  -webkit-backdrop-filter: saturate(150%) blur(var(--blur-glass));
+}
+.lang-btn {
+  display: inline-flex;
+  align-items: center;
+  padding: 6px 10px;
+  border: 0;
+  border-radius: var(--radius-pill);
+  background: transparent;
+  color: var(--text-dim);
+  font: inherit;
+  font-size: var(--fs-md);
+  font-weight: 700;
+  line-height: 1;
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
+  user-select: none;
+}
+.lang-btn:hover { color: var(--text); background: rgba(255, 255, 255, 0.05); }
+.lang-btn:focus-visible { outline: 2px solid var(--accent-ring); outline-offset: 2px; }
+.lang-btn[aria-pressed="true"] {
+  color: #fff;
+  background: var(--accent);
+  box-shadow: var(--accent-glow);
+}
+.lang-btn[aria-pressed="true"]:hover { background: var(--accent-hover); }
+
+/* ── 接続状態バッジ ───────────────────────────────────
+   静的な「接続」キャプションを ::before で前置（JS は .conn-label のみ書換）。 */
+.conn-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  white-space: nowrap;
+  padding: 6px 12px;
+  border-radius: var(--radius-pill);
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+  backdrop-filter: saturate(150%) blur(var(--blur-glass));
+  -webkit-backdrop-filter: saturate(150%) blur(var(--blur-glass));
+  cursor: help;
+}
+.conn-status::before {
+  content: "接続";
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  color: var(--text-faint);
+}
+.conn-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--text-faint);
+  flex: none;
+}
+.conn-status--ok    { color: #93e6a3; border-color: rgba(63, 185, 80, 0.40); }
+.conn-status--ok    .conn-dot { background: var(--ok); box-shadow: 0 0 8px rgba(63, 185, 80, 0.70); }
+.conn-status--warn  { color: #e7c66a; border-color: rgba(216, 166, 41, 0.40); }
+.conn-status--warn  .conn-dot { background: var(--warn); }
+.conn-status--error { color: #ff9b94; border-color: rgba(244, 86, 77, 0.40); }
+.conn-status--error .conn-dot { background: var(--error); box-shadow: 0 0 8px rgba(244, 86, 77, 0.60); }
+.conn-status--unknown .conn-dot { background: var(--text-faint); }
+
+@media (prefers-reduced-motion: no-preference) {
+  .conn-status--ok .conn-dot { animation: breathe 2.4s ease-in-out infinite; }
+  .conn-status--unknown .conn-dot { animation: pulse 1.2s ease-in-out infinite; }
+}
+@keyframes pulse  { 0%, 100% { opacity: 0.35; } 50% { opacity: 1; } }
+@keyframes breathe {
+  0%, 100% { box-shadow: 0 0 6px rgba(63, 185, 80, 0.45); }
+  50%      { box-shadow: 0 0 11px rgba(63, 185, 80, 0.85); }
+}
+
+/* ── ヘルプ / 凡例ポップオーバー（<details> 駆動・JSなし） ── */
+.help { position: relative; }
+.help > summary {
+  list-style: none;
+  font-weight: 800;
+}
+.help > summary::-webkit-details-marker { display: none; }
+.help-btn .btn-icon { font-size: 14px; }
+.help[open] .help-btn {
+  background: var(--surface-3);
+  border-color: var(--border-strong);
+}
+.help-panel {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 8px);
+  width: 320px;
+  max-height: calc(100vh - 80px);
+  overflow-y: auto;
+  z-index: 40;
+  background: var(--surface-1-solid);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-pop);
+  padding: 14px 16px;
+  backdrop-filter: blur(var(--blur-chrome));
+  -webkit-backdrop-filter: blur(var(--blur-chrome));
+}
+.help-title {
+  margin: 0 0 6px;
+  font-size: var(--fs-lg);
+  font-weight: 700;
+  color: var(--text);
+}
+.help-sub {
+  margin: 14px 0 6px;
+  font-size: var(--fs-sm);
+  font-weight: 700;
+  color: var(--text-dim);
+}
+.help-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 9px;
+  font-size: var(--fs-md);
+  color: var(--text-dim);
+}
+.help-list b { color: var(--text); font-weight: 700; }
+.help-list li { display: flex; align-items: center; gap: 9px; }
+.help-foot {
+  margin: 12px 0 0;
+  font-size: var(--fs-cap);
+  color: var(--text-faint);
+}
+.chip {
+  display: inline-flex;
+  min-width: 24px;
+  height: 22px;
+  padding: 0 6px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 6px;
+  background: var(--surface-2-solid);
+  border: 1px solid var(--border);
+  font-size: 12px;
+  font-weight: 800;
+  flex: none;
+}
+.chip-hd { background: var(--hd); color: var(--hd-ink); border-color: var(--hd); }
+.chip-q  { font-size: 10px; }
+.dot { width: 9px; height: 9px; border-radius: 50%; flex: none; }
+.dot-live { background: var(--live); }
+.dot-ok   { background: var(--ok); }
+.dot-err  { background: var(--error); }
+/* 凡例のミニグリッド字形 */
+.lg { display: inline-grid; gap: 1.5px; width: 16px; height: 16px; flex: none; }
+.lg-4 { grid-template: 1fr 1fr / 1fr 1fr; }
+.lg i { background: var(--text-dim); border-radius: 1.5px; }
+
+/* ── 本体 ───────────────────────────────────────────── */
+
+.app-main {
+  flex: 1;
+  width: 100%;
+  max-width: 1800px;
+  margin: 0 auto;
+  padding: clamp(16px, 3vw, 28px);
+}
+
+/*
+  ペイングリッド。レイアウトは [data-layout] 属性で切替える:
+    1 → 1列 × 1行   2 → 2列 × 1行   4 → 2列 × 2行   6 → 3列 × 2行
+  行は auto で高さを内容（16:9 映像）に追従させる。
+*/
+.pane-grid {
+  display: grid;
+  gap: var(--gap);
+  grid-template-columns: 1fr;
+}
+.pane-grid[data-layout="1"] { grid-template-columns: 1fr; }
+.pane-grid[data-layout="2"] { grid-template-columns: repeat(2, 1fr); }
+.pane-grid[data-layout="4"] { grid-template-columns: repeat(2, 1fr); }
+.pane-grid[data-layout="6"] { grid-template-columns: repeat(3, 1fr); }
+
+/* 1画面のときは中央寄せで大きくなりすぎないよう幅を抑える。 */
+.pane-grid[data-layout="1"] {
+  max-width: 1100px;
+  margin-inline: auto;
+}
+
+/* ── ペイン（カメラ枠） ───────────────────────────── */
+
+.pane {
+  background: var(--surface-1);
+  backdrop-filter: saturate(140%) blur(var(--blur-chrome));
+  -webkit-backdrop-filter: saturate(140%) blur(var(--blur-chrome));
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius);
+  overflow: hidden;
+  box-shadow: var(--shadow-pane), var(--shadow-inset);
+  display: flex;
+  flex-direction: column;
+  transition: border-color 0.18s ease, box-shadow 0.18s ease, transform 0.18s ease;
+}
+.pane:hover { border-color: var(--border-strong); }
+
+/* 未割当ペインはトーンを少し落として区別する。 */
+.pane.is-empty {
+  border-style: dashed;
+  border-color: var(--border);
+  box-shadow: none;
+}
+
+.pane-video-wrap {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  background: var(--bg-video);
+  overflow: hidden;
+}
+
+/* go2rtc の <video-stream>。内部 <video> を含むカスタム要素。
+   ※ insertBefore(video, wrap.firstChild) を壊さないため z-index のみ付与。 */
+video-stream {
+  position: relative;
+  z-index: 1;
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+video-stream video {
+  width: 100% !important;
+  height: 100% !important;
+  object-fit: contain;
+  background: var(--bg-video);
+}
+
+/* 上端スクリム（映像が明るくてもバッジが読めるように）。is-live のみ。
+   映像(z1)より上・チップ(z4)より下に置く。 */
+.pane-video-wrap.is-live::before {
+  content: "";
+  position: absolute;
+  inset: 0 0 auto 0;
+  height: 64px;
+  z-index: 2;
+  background: linear-gradient(180deg, rgba(0, 0, 0, 0.38), transparent);
+  pointer-events: none;
+}
+
+/* フルスクリーン時は contain のまま中央表示 */
+.pane-video-wrap:fullscreen,
+.pane-video-wrap:-webkit-full-screen {
+  background: #000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.pane-video-wrap:fullscreen video-stream,
+.pane-video-wrap:-webkit-full-screen video-stream { height: 100%; }
+
+/* LIVE インジケータ（is-live クラス連動・JSなし。右上） */
+.cam-live {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  z-index: 4;
+  display: none;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 9px 3px 8px;
+  border-radius: var(--radius-xs);
+  font: 800 11px/1 var(--font);
+  letter-spacing: 0.08em;
+  color: #fff;
+  background: rgba(4, 6, 10, 0.62);
+  border: 1px solid rgba(255, 59, 59, 0.45);
+  backdrop-filter: blur(var(--blur-glass));
+  -webkit-backdrop-filter: blur(var(--blur-glass));
+  pointer-events: none;
+}
+.pane-video-wrap.is-live .cam-live { display: inline-flex; }
+.cam-live-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--live);
+  box-shadow: 0 0 0 0 var(--live-glow);
+}
+@media (prefers-reduced-motion: no-preference) {
+  .cam-live-dot { animation: livePulse 1.6s ease-out infinite; }
+}
+@keyframes livePulse {
+  0%   { box-shadow: 0 0 0 0 var(--live-glow); }
+  70%  { box-shadow: 0 0 0 7px rgba(255, 59, 59, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(255, 59, 59, 0); }
+}
+
+/* カメラ未割当 / RTSP未設定 のプレースホルダ */
+.pane-placeholder {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  color: var(--text-faint);
+  text-align: center;
+  padding: 12px;
+  background:
+    repeating-linear-gradient(
+      135deg,
+      rgba(255, 255, 255, 0.012) 0 10px,
+      transparent 10px 20px
+    ),
+    var(--bg-video);
+}
+/* 映像表示中はプレースホルダを隠す（app.js が is-live を付与） */
+.pane-video-wrap.is-live .pane-placeholder { display: none; }
+
+.pane-placeholder-icon {
+  font-size: 30px;
+  font-weight: 300;
+  line-height: 1;
+  opacity: 0.7;
+}
+.pane-placeholder-text {
+  font-size: var(--fs-md);
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  max-width: 90%;
+}
+/* 2行目のヒント。状態で文言を出し分け（既定＝未割当）。 */
+.pane-placeholder-hint {
+  font-size: var(--fs-cap);
+  color: var(--text-faint);
+  max-width: 90%;
+}
+.pane-placeholder-hint::before { content: "下のメニューからカメラを選択してください"; }
+/* RTSP未設定（app.js が .pane に is-unconfigured を付与） */
+.pane.is-unconfigured .pane-placeholder-icon { color: var(--warn); opacity: 0.85; }
+.pane.is-unconfigured .pane-placeholder-hint::before {
+  content: "go2rtc.yaml にこのカメラのストリームを定義すると表示できます";
+}
+
+/* 画質バッジ（SD/HD）。「画質」キャプションを ::before で前置（textContent と別） */
+.cam-badge {
+  position: absolute;
+  top: 10px;
+  left: 10px;
+  z-index: 4;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font: 800 11px/1 var(--font);
+  letter-spacing: 0.06em;
+  padding: 3px 9px;
+  border-radius: var(--radius-xs);
+  color: var(--text-dim);
+  background: rgba(4, 6, 10, 0.70);
+  border: 1px solid var(--border);
+  backdrop-filter: blur(var(--blur-glass));
+  -webkit-backdrop-filter: blur(var(--blur-glass));
+  pointer-events: none;
+}
+/* hidden 属性を尊重（同上の落とし穴）。未割当/未設定ペインで JS が hidden=true にしたとき、
+   .cam-badge{display:inline-flex} が打ち消さないよう明示的に消す（空ペインの SD ピル残り防止）。 */
+.cam-badge[hidden] { display: none; }
+.cam-badge--quality::before {
+  content: "画質";
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  color: var(--text-faint);
+}
+.cam-badge--hd { color: var(--hd-ink); background: var(--hd); border-color: var(--hd); }
+.cam-badge--hd::before { color: rgba(28, 19, 4, 0.65); }
+
+/* 一時オーバーレイ（撮影フィードバック等）。シャッターの白フラッシュ付き。 */
+.cam-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(4, 6, 10, 0.45);
+  backdrop-filter: blur(2px);
+  -webkit-backdrop-filter: blur(2px);
+}
+/* hidden 属性を尊重する。UA の [hidden]{display:none} を .cam-overlay{display:flex} が
+   上書きしてしまう有名な落とし穴。これが無いと撮影フィードバック用の暗幕＋空ピル（楕円）が
+   常時表示され、映像が暗く見える。撮影中だけ JS が hidden を外して表示する。 */
+.cam-overlay[hidden] { display: none; }
+.cam-overlay::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: #fff;
+  opacity: 0;
+  pointer-events: none;
+}
+@media (prefers-reduced-motion: no-preference) {
+  .cam-overlay { animation: overlayIn 0.12s ease-out; }
+  .cam-overlay::after { animation: shutterFlash 0.28s ease-out; }
+}
+@keyframes overlayIn { from { opacity: 0; } to { opacity: 1; } }
+@keyframes shutterFlash { 0% { opacity: 0.55; } 100% { opacity: 0; } }
+
+.cam-overlay-text {
+  position: relative;
+  z-index: 1;
+  font: 700 14px/1 var(--font);
+  color: var(--text);
+  background: rgba(11, 14, 20, 0.90);
+  padding: 9px 18px;
+  border-radius: var(--radius-pill);
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow-pop);
+}
+
+/* ペイン下部バー */
+.pane-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 9px 11px;
+  background: var(--surface-2);
+  backdrop-filter: saturate(150%) blur(var(--blur-glass));
+  -webkit-backdrop-filter: saturate(150%) blur(var(--blur-glass));
+  border-top: 1px solid var(--border-soft);
+}
+
+.pane-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  flex: 1;
+}
+
+/* 操作対象を示す静的キャプション */
+.meta-cap {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  color: var(--text-faint);
+  flex: none;
+}
+
+/* カメラ選択ドロップダウン（左にカメラ字形、右に矢印） */
+.pane-select {
+  appearance: none;
+  -webkit-appearance: none;
+  font-family: var(--font);
+  font-size: var(--fs-md);
+  font-weight: 700;
+  line-height: 1.2;
+  color: var(--text);
+  background-color: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: 7px 28px 7px 30px;
+  max-width: 100%;
+  min-width: 0;
+  cursor: pointer;
+  text-overflow: ellipsis;
+  background-image:
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 24 24' fill='none' stroke='%23a2b1c2' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect x='2' y='6' width='14' height='12' rx='2'/%3E%3Cpath d='M16 10l6-3v10l-6-3z'/%3E%3C/svg%3E"),
+    linear-gradient(45deg, transparent 50%, var(--text-dim) 50%),
+    linear-gradient(135deg, var(--text-dim) 50%, transparent 50%);
+  background-position: 9px 50%, calc(100% - 14px) calc(50% - 2px), calc(100% - 9px) calc(50% - 2px);
+  background-size: 14px 14px, 5px 5px, 5px 5px;
+  background-repeat: no-repeat;
+  transition: border-color 0.15s ease, background-color 0.15s ease;
+}
+.pane-select:hover {
+  border-color: var(--border-strong);
+  background-color: var(--surface-3);
+}
+.pane-select:focus-visible {
+  outline: 2px solid var(--accent-ring);
+  outline-offset: 2px;
+}
+.pane-select option { background: var(--surface-1-solid); color: var(--text); font-weight: 600; }
+.pane-select option[data-unconfigured] { color: var(--text-faint); }
+
+/* IP アドレス（モノ＋静的「IP」チップ。未割当時は空＝チップも出さない） */
+.cam-addr {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font: 500 12px/1 var(--font-mono);
+  color: var(--text-faint);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  flex: none;
+}
+.cam-addr:not(:empty)::before {
+  content: "IP";
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  color: var(--text-faint);
+  opacity: 0.85;
+  padding: 1px 4px;
+  border: 1px solid var(--border-soft);
+  border-radius: 4px;
+}
+
+.cam-controls {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  flex: none;
+}
+.controls-cap {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  color: var(--text-faint);
+  flex: none;
+}
+
+/* ── ボタン ───────────────────────────────────────── */
+
+.btn {
+  appearance: none;
+  cursor: pointer;
+  font-family: var(--font);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  line-height: 1;
+  color: var(--text);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: 7px 11px;
+  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease,
+    transform 0.05s ease;
+  user-select: none;
+  white-space: nowrap;
+}
+.btn:hover  { background: var(--surface-3); border-color: var(--border-strong); }
+.btn:active { transform: translateY(1px); }
+.btn:focus-visible { outline: 2px solid var(--accent-ring); outline-offset: 2px; }
+.btn:disabled { opacity: 0.4; cursor: not-allowed; }
+.btn--ghost { background: transparent; }
+a.btn { text-decoration: none; }   /* リンクをボタン表示にする場合の下線除去 */
+.btn-icon { font-size: 15px; line-height: 1; }
+
+/* HD トグル（"画質HD" 表記。状態は amber 反転） */
+.btn--hd {
+  font-weight: 800;
+  letter-spacing: 0.03em;
+  justify-content: center;
+}
+.btn--hd.is-active { color: var(--hd-ink); background: var(--hd); border-color: var(--hd); }
+.btn--hd.is-active:hover { background: #ffb24d; }
+
+/* アイコンボタンは既定でテキストも表示（狭幅で隠す） */
+.btn--icon .btn-text { display: inline; }
+
+/* ── 空状態 ───────────────────────────────────────── */
+
+.empty-state {
+  margin: 48px auto;
+  max-width: 520px;
+  text-align: center;
+  padding: 32px;
+  background: var(--surface-1);
+  backdrop-filter: saturate(140%) blur(var(--blur-chrome));
+  -webkit-backdrop-filter: saturate(140%) blur(var(--blur-chrome));
+  border: 1px dashed var(--border);
+  border-radius: var(--radius);
+}
+.empty-title {
+  margin: 0 0 8px;
+  font-size: var(--fs-h2);
+  font-weight: 700;
+}
+.empty-desc {
+  margin: 0;
+  font-size: 13.5px;
+  color: var(--text-dim);
+  word-break: break-word;
+}
+
+/* ── フッタ ───────────────────────────────────────── */
+
+.app-footer {
+  padding: 16px clamp(16px, 4vw, 32px);
+  padding-bottom: max(16px, env(safe-area-inset-bottom));
+  text-align: center;
+  font-size: var(--fs-sm);
+  color: var(--text-faint);
+  border-top: 1px solid var(--border-soft);
+  background: rgba(11, 14, 20, 0.55);
+  backdrop-filter: saturate(140%) blur(var(--blur-glass));
+  -webkit-backdrop-filter: saturate(140%) blur(var(--blur-glass));
+}
+
+/* ── レスポンシブ ─────────────────────────────────── */
+
+/* 中幅: 6分割を2列に。 */
+@media (max-width: 1100px) {
+  .pane-grid[data-layout="6"] { grid-template-columns: repeat(2, 1fr); }
+}
+
+/* 狭幅: すべて1列。キャプションは省くが、字形・数字・ラベルは残す。 */
+@media (max-width: 760px) {
+  .pane-grid,
+  .pane-grid[data-layout="1"],
+  .pane-grid[data-layout="2"],
+  .pane-grid[data-layout="4"],
+  .pane-grid[data-layout="6"] { grid-template-columns: 1fr; }
+  .brand-sub { display: none; }
+  .layout-caption,
+  .controls-cap,
+  .meta-cap { display: none; }
+  .lb-word { display: none; }                 /* グリフ＋数字は残す */
+  .btn--icon .btn-text { display: none; }      /* アイコンのみ。HD は文字を残す */
+  .btn--icon { padding: 8px 10px; }
+}
+
+@media (max-width: 520px) {
+  .app-header { flex-wrap: wrap; row-gap: 10px; }
+  .header-actions { gap: 8px; flex-wrap: wrap; }
+  .conn-status .conn-label { display: none; }  /* ドット＋「接続」キャプションは残す */
+  .conn-status { padding: 7px 9px; }
+  #reload-btn .btn-text,
+  .view-link .vl-text,
+  .help-btn .btn-text { display: none; }
+  .layout-btn { padding: 6px 8px; gap: 4px; }
+  /*
+    スマホ幅でも position:absolute のドロップダウンのまま、幅だけ画面に収める。
+    ※ position:fixed のボトムシートは使わない —— 親 .help は backdrop-filter を持つ
+      .app-header の内側にあり、backdrop-filter は fixed 子孫の包含ブロックを生成するため、
+      fixed はビューポートではなくヘッダ基準になり画面上部へめり込む（summary を覆う）。
+      絶対配置なら包含ブロックは .help（position:relative）のままで正しく真下に開く。
+  */
+  .help-panel {
+    width: min(320px, calc(100vw - 16px));
+    max-height: calc(100vh - 96px);
+  }
+}
+
+/* タッチ環境ではタップ標的を確保 */
+@media (pointer: coarse) {
+  .btn,
+  .layout-btn,
+  .view-link,
+  .pane-select,
+  .help-btn { min-height: 40px; }
+}
+
+/* モーション抑制設定への配慮（新規アニメも no-preference ガード済み） */
+@media (prefers-reduced-motion: reduce) {
+  * {
+    animation-duration: 0.001ms !important;
+    transition-duration: 0.001ms !important;
+  }
+}

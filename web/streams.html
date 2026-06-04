@@ -1,0 +1,309 @@
+<!DOCTYPE html>
+<html lang="en" data-title-key="mgmt.doc.title">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <meta name="color-scheme" content="dark" />
+  <meta name="robots" content="noindex, nofollow" />
+  <!--
+    Content-Security-Policy（多層防御）。既定では LAN/loopback の go2rtc(:1984) だけを
+    参照する。?go2rtc= で go2rtc を別ホストに向ける場合は、そのオリジン（例
+    http://192.0.2.50:1984）を script-src / img-src / connect-src / frame-src に追記する。
+    frame-src は「ネットワーク」タブの go2rtc 接続経路図（iframe）用。クリックジャック
+    対策の frame-ancestors は HTTP ヘッダ専用（meta では無効）のため付与していない。
+  -->
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' http://localhost:1984 http://127.0.0.1:1984; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: http://localhost:1984 http://127.0.0.1:1984; media-src 'self' blob: http://localhost:1984 http://127.0.0.1:1984; connect-src 'self' http://localhost:1984 http://127.0.0.1:1984 ws://localhost:1984 ws://127.0.0.1:1984; frame-src 'self' http://localhost:1984 http://127.0.0.1:1984; base-uri 'self'; object-src 'none'; form-action 'self'" />
+  <title>ストリーム管理 — 防犯カメラ</title>
+  <!-- ビューアと同じインライン SVG ファビコン（404防止） -->
+  <link
+    rel="icon"
+    href="data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2032%2032'%3E%3Crect%20width='32'%20height='32'%20rx='7'%20fill='%230d1117'/%3E%3Ccircle%20cx='16'%20cy='16'%20r='6'%20fill='%232f81f7'/%3E%3C/svg%3E"
+  />
+  <!-- ビューアと共通のデザイントークン・基本コンポーネント -->
+  <link rel="stylesheet" href="./style.css?v=10" />
+  <!-- このページ固有のスタイル -->
+  <link rel="stylesheet" href="./streams.css?v=10" />
+</head>
+<body>
+  <header class="app-header">
+    <div class="brand">
+      <span class="brand-mark" aria-hidden="true">
+        <svg viewBox="0 0 24 24" width="14" height="14" fill="none"
+             stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="2" y="6" width="14" height="12" rx="2.5" />
+          <path d="M16 10l6-3v10l-6-3z" />
+        </svg>
+      </span>
+      <h1 class="brand-title" data-i18n="mgmt.brand.title">ストリーム管理</h1>
+      <span class="brand-sub" data-i18n="mgmt.brand.sub">go2rtc / LAN内</span>
+    </div>
+
+    <div class="header-actions">
+      <span id="conn-status" class="conn-status conn-status--unknown" title="go2rtc サーバーとの接続状態" data-i18n-title="common.go2rtc.connStatus.title">
+        <span class="conn-dot" aria-hidden="true"></span>
+        <span class="conn-label" data-i18n="common.connStatus.checking">接続確認中…</span>
+      </span>
+      <button id="reload-btn" type="button" class="btn btn--ghost" title="ストリーム一覧を更新します" data-i18n-title="mgmt.reload.title">
+        <span class="btn-icon" aria-hidden="true">⟳</span><span class="btn-text" data-i18n="common.reload.text">更新</span>
+      </button>
+
+      <!-- ビューア ⇄ 管理 の画面切替（ここでは管理が active）。両ページで [接続][更新][切替][ヘルプ] の順に統一 -->
+      <nav class="view-switch" aria-label="画面切替" data-i18n-aria-label="common.viewSwitch.aria">
+        <a class="view-link" href="./index.html" title="カメラ映像を見る" data-i18n-title="common.viewSwitch.viewer.title">
+          <span class="vl-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor"
+                 stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <rect x="3" y="4" width="18" height="14" rx="2" /><path d="M8 21h8" /><path d="M12 18v3" />
+            </svg>
+          </span><span class="vl-text" data-i18n="common.viewSwitch.viewer.text">ビューア</span>
+        </a>
+        <a class="view-link is-active" href="./streams.html" aria-current="page" title="go2rtc のストリームを管理" data-i18n-title="common.viewSwitch.manage.title">
+          <span class="vl-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor"
+                 stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <line x1="4" y1="6" x2="20" y2="6" /><line x1="4" y1="12" x2="20" y2="12" /><line x1="4" y1="18" x2="20" y2="18" />
+              <circle cx="9" cy="6" r="2" fill="currentColor" stroke="none" /><circle cx="15" cy="12" r="2" fill="currentColor" stroke="none" /><circle cx="9" cy="18" r="2" fill="currentColor" stroke="none" />
+            </svg>
+          </span><span class="vl-text" data-i18n="common.viewSwitch.manage.text">管理</span>
+        </a>
+      </nav>
+
+      <div class="lang-switch" role="group" aria-label="言語 / Language">
+        <button type="button" class="lang-btn" data-lang="ja" aria-pressed="false">日本語</button>
+        <button type="button" class="lang-btn" data-lang="en" aria-pressed="true">EN</button>
+      </div>
+
+      <details class="help">
+        <summary class="btn btn--ghost help-btn" title="各項目の意味を表示" data-i18n-title="mgmt.help.title">
+          <span class="btn-icon" aria-hidden="true">?</span><span class="btn-text" data-i18n="common.help.text">ヘルプ</span>
+        </summary>
+        <div class="help-panel" role="dialog" aria-label="操作ガイド" data-i18n-aria-label="common.help.panel.aria">
+          <h2 class="help-title" data-i18n="common.help.title">操作ガイド</h2>
+          <ul class="help-list">
+            <li><span class="dot dot-live"></span><b data-i18n="mgmt.help.viewers.label">視聴者</b> — <span data-i18n="mgmt.help.viewers.desc">そのストリームを今見ている数（右上のバッジ）</span></li>
+            <li><span class="chip">▶&#xFE0E;</span><b data-i18n="mgmt.help.watch.label">視聴</b> — <span data-i18n="mgmt.help.watch.desc">go2rtc のプレイヤーで再生（再生モードを反映）</span></li>
+            <li><span class="chip">i</span><b data-i18n="mgmt.help.info.label">情報</b> — <span data-i18n="mgmt.help.info.desc">ストリームの状態を JSON で表示</span></li>
+            <li><span class="chip">⚙</span><b data-i18n="mgmt.help.probe.label">プローブ</b> — <span data-i18n="mgmt.help.probe.desc">コーデック等のメディア情報を解析表示</span></li>
+            <li><span class="chip">⛓</span><b data-i18n="mgmt.help.links.label">リンク</b> — <span data-i18n="mgmt.help.links.desc">RTSP/HLS 等の各種URL一覧</span></li>
+            <li><span class="chip">⇄</span><b data-i18n="mgmt.help.net.label">ネット</b> — <span data-i18n="mgmt.help.net.desc">接続経路（producer/consumer）の図</span></li>
+            <li><span class="chip chip-danger">🗑</span><b data-i18n="mgmt.help.delete.label">削除</b> — <span data-i18n="mgmt.help.delete.desc">一覧から削除（go2rtc.yaml記載分は再起動で復活）</span></li>
+          </ul>
+          <h3 class="help-sub" data-i18n="mgmt.help.modes.heading">再生モード</h3>
+          <p class="help-note" data-i18n="mgmt.help.modes.note">「視聴」で開くプレイヤーの再生方式。チェックした順（WebRTC→MSE→HLS→MJPEG）に試行します。低遅延優先なら WebRTC、互換性優先なら MSE/HLS。</p>
+          <p class="help-foot" data-i18n="mgmt.help.foot">この画面は go2rtc API（<code>:1984</code>）を読み書きします。標準UIは下部リンクから。</p>
+        </div>
+      </details>
+    </div>
+  </header>
+
+  <main class="app-main">
+    <!-- タブバー（ヘッダ直下・全タブ共通）。streams.js が切替を管理する。 -->
+    <nav class="tabbar" role="tablist" aria-label="管理メニュー" data-i18n-aria-label="mgmt.tabbar.label">
+      <button type="button" class="tab is-active" id="tab-streams" role="tab"
+              aria-selected="true" aria-controls="panel-streams" data-tab="streams">
+        <span class="tab-ico" aria-hidden="true">
+          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor"
+               stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <line x1="4" y1="6" x2="20" y2="6"/><line x1="4" y1="12" x2="20" y2="12"/><line x1="4" y1="18" x2="20" y2="18"/>
+          </svg></span><span class="tab-txt" data-i18n="mgmt.tab.streams">ストリーム</span>
+      </button>
+      <button type="button" class="tab" id="tab-config" role="tab"
+              aria-selected="false" aria-controls="panel-config" data-tab="config">
+        <span class="tab-ico" aria-hidden="true">
+          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor"
+               stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.6 1.6 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.6 1.6 0 0 0-2.7 1.1V21a2 2 0 0 1-4 0v-.1A1.6 1.6 0 0 0 7 19.4a1.6 1.6 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1A1.6 1.6 0 0 0 4.6 14H4.5a2 2 0 0 1 0-4h.1A1.6 1.6 0 0 0 7 4.6l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1A1.6 1.6 0 0 0 12 3.6V3.5a2 2 0 0 1 4 0v.1a1.6 1.6 0 0 0 2.7 1.1l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.6 1.6 0 0 0-.3 1.8z"/>
+          </svg></span><span class="tab-txt" data-i18n="mgmt.tab.config">設定</span>
+      </button>
+      <button type="button" class="tab" id="tab-log" role="tab"
+              aria-selected="false" aria-controls="panel-log" data-tab="log">
+        <span class="tab-ico" aria-hidden="true">
+          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor"
+               stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M14 3v5h5"/><path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+            <line x1="8" y1="13" x2="16" y2="13"/><line x1="8" y1="17" x2="13" y2="17"/>
+          </svg></span><span class="tab-txt" data-i18n="mgmt.tab.log">ログ</span>
+      </button>
+      <button type="button" class="tab" id="tab-net" role="tab"
+              aria-selected="false" aria-controls="panel-net" data-tab="net">
+        <span class="tab-ico" aria-hidden="true">
+          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor"
+               stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="5" cy="6" r="2"/><circle cx="19" cy="6" r="2"/><circle cx="12" cy="18" r="2"/>
+            <path d="M7 6h10"/><path d="M5 8v2a4 4 0 0 0 4 4h1"/><path d="M19 8v2a4 4 0 0 1-4 4h-1"/><path d="M12 14v2"/>
+          </svg></span><span class="tab-txt" data-i18n="mgmt.tab.net">ネットワーク</span>
+      </button>
+    </nav>
+
+    <!-- ── ストリームタブ（既存の内容をそのまま内包） ── -->
+    <section id="panel-streams" class="tabpanel is-active" role="tabpanel" aria-labelledby="tab-streams">
+    <!-- ツールバー: 再生モード + 追加 -->
+    <div class="sg-toolbar">
+      <div class="modes-group">
+        <span class="modes-cap" aria-hidden="true" data-i18n="mgmt.modes.caption">再生モード（「視聴」に適用）</span>
+        <div class="modes" id="modes" role="group" aria-label="再生モード" data-i18n-aria-label="mgmt.modes.group.label">
+          <label class="mode-chip"><input type="checkbox" name="webrtc" checked /><span>WebRTC</span></label>
+          <label class="mode-chip"><input type="checkbox" name="mse" checked /><span>MSE</span></label>
+          <label class="mode-chip"><input type="checkbox" name="hls" checked /><span>HLS</span></label>
+          <label class="mode-chip"><input type="checkbox" name="mjpeg" checked /><span>MJPEG</span></label>
+        </div>
+      </div>
+
+      <button id="add-toggle" type="button" class="btn btn--primary" title="新しいストリームを追加" aria-expanded="false" data-i18n-title="mgmt.addtoggle.title">
+        <span class="btn-icon" aria-hidden="true">＋</span><span class="btn-text" data-i18n="mgmt.addtoggle.text">ストリーム追加</span>
+      </button>
+    </div>
+
+    <!-- 追加フォーム（既定で閉じる） -->
+    <form id="add-form" class="add-form" hidden>
+      <div class="af-field">
+        <label class="af-label" for="af-name" data-i18n="mgmt.add.name.label">名前</label>
+        <input class="af-input" id="af-name" name="name" type="text" autocomplete="off"
+               placeholder="例: cam_door" data-i18n-placeholder="mgmt.add.name.placeholder" required />
+      </div>
+      <div class="af-field af-field--wide">
+        <label class="af-label" for="af-src" data-i18n="mgmt.add.src.label">ソース</label>
+        <input class="af-input" id="af-src" name="src" type="text" autocomplete="off"
+               placeholder="例: rtsp://user:pass@192.0.2.50:554/stream  または  ffmpeg:rtsp://…#video=h264" data-i18n-placeholder="mgmt.add.src.placeholder" required />
+      </div>
+      <div class="af-actions">
+        <button type="submit" class="btn btn--primary" data-i18n="mgmt.add.submit">追加する</button>
+        <button type="button" class="btn btn--ghost" id="add-cancel" data-i18n="mgmt.add.cancel">キャンセル</button>
+      </div>
+      <p class="af-note" data-i18n="mgmt.add.note">
+        ここでの追加は go2rtc の実行中設定への即時反映です。<b>恒久化するには go2rtc.yaml に追記</b>してください（再起動で消えないように）。
+      </p>
+      <p class="af-msg" id="add-msg" role="status" hidden></p>
+    </form>
+
+    <!-- ストリーム一覧（streams.js が描画） -->
+    <div id="stream-grid" class="stream-grid" role="list" aria-label="ストリーム一覧"></div>
+
+    <!-- 空 / エラー状態 -->
+    <div id="empty-state" class="empty-state" hidden>
+      <p class="empty-title" data-i18n="mgmt.empty.title">ストリームがありません</p>
+      <p class="empty-desc" data-i18n="mgmt.empty.desc">go2rtc にストリームが登録されていません。「ストリーム追加」または go2rtc.yaml をご確認ください。</p>
+    </div>
+    </section>
+
+    <!-- ── 設定タブ（go2rtc.yaml エディタ。GET/POST /api/config + 再起動） ── -->
+    <section id="panel-config" class="tabpanel" role="tabpanel" aria-labelledby="tab-config" hidden>
+      <div class="cfg-toolbar">
+        <div class="cfg-state">
+          <span id="cfg-status" class="cfg-status" role="status" data-i18n="mgmt.cfg.status.loading">読み込み中…</span>
+          <span id="cfg-dirty" class="cfg-dirty" hidden data-i18n="mgmt.cfg.dirty">● 未保存</span>
+        </div>
+        <div class="cfg-actions">
+          <button type="button" id="cfg-download" class="btn btn--ghost btn--sm" title="現在の設定を .yaml でダウンロード" data-i18n-title="mgmt.cfg.download.title">
+            <span class="btn-icon" aria-hidden="true">⤓</span><span class="btn-text" data-i18n="mgmt.cfg.download.text">バックアップ</span>
+          </button>
+          <button type="button" id="cfg-reload" class="btn btn--ghost btn--sm" title="サーバから再読込（未保存は破棄）" data-i18n-title="mgmt.cfg.reload.title">
+            <span class="btn-icon" aria-hidden="true">⟳</span><span class="btn-text" data-i18n="mgmt.cfg.reload.text">再読込</span>
+          </button>
+          <button type="button" id="cfg-save" class="btn btn--primary btn--sm" title="go2rtc.yaml に保存" disabled data-i18n-title="mgmt.cfg.save.title">
+            <span class="btn-icon" aria-hidden="true">⤴</span><span class="btn-text" data-i18n="mgmt.cfg.save.text">保存</span>
+          </button>
+        </div>
+      </div>
+      <p class="cfg-warn" role="note" data-i18n="mgmt.cfg.warn">
+        ⚠ 保存するとファイル全体が上書きされます（コメントは保持されますが、構文エラーやうっかり削除もそのまま反映されます）。
+        反映には <b>go2rtc の再起動</b>が必要で、ストリームが一時的に切断されます。初回編集前に「バックアップ」を推奨します。
+      </p>
+      <textarea id="cfg-editor" class="cfg-editor" spellcheck="false" autocomplete="off"
+                autocapitalize="off" autocorrect="off" wrap="off"
+                aria-label="go2rtc.yaml の内容" placeholder="読み込み中…"
+                data-i18n-aria-label="mgmt.cfg.editor.label" data-i18n-placeholder="mgmt.cfg.editor.placeholder"></textarea>
+    </section>
+
+    <!-- ── ログタブ（GET /api/log を3sポーリング） ── -->
+    <section id="panel-log" class="tabpanel" role="tabpanel" aria-labelledby="tab-log" hidden>
+      <div class="log-toolbar">
+        <div class="log-filters">
+          <label class="log-chk"><input type="checkbox" id="log-auto" checked /><span data-i18n="mgmt.log.auto">自動更新</span></label>
+          <label class="log-chk"><input type="checkbox" id="log-newest" /><span data-i18n="mgmt.log.newest">新しい順</span></label>
+          <select id="log-level" class="log-level" aria-label="表示する最小レベル" data-i18n-aria-label="mgmt.log.level.label">
+            <option value="trace" data-i18n="mgmt.log.level.all">全レベル</option>
+            <option value="debug" data-i18n="mgmt.log.level.debug">debug 以上</option>
+            <option value="info" selected data-i18n="mgmt.log.level.info">info 以上</option>
+            <option value="warn" data-i18n="mgmt.log.level.warn">warn 以上</option>
+            <option value="error" data-i18n="mgmt.log.level.error">error のみ</option>
+          </select>
+          <input type="search" id="log-search" class="log-search" placeholder="検索（message / context）" data-i18n-placeholder="mgmt.log.search.placeholder" autocomplete="off" />
+        </div>
+        <div class="log-actions">
+          <span id="log-status" class="log-meta" role="status"></span>
+          <button type="button" id="log-refresh" class="btn btn--ghost btn--sm" title="今すぐ更新" data-i18n-title="mgmt.log.refresh.title">
+            <span class="btn-icon" aria-hidden="true">⟳</span><span class="btn-text" data-i18n="mgmt.log.refresh.text">更新</span>
+          </button>
+          <button type="button" id="log-copy" class="btn btn--ghost btn--sm" title="表示中のログをコピー" data-i18n-title="mgmt.log.copy.title">
+            <span class="btn-icon" aria-hidden="true">⧉</span><span class="btn-text" data-i18n="mgmt.log.copy.text">コピー</span>
+          </button>
+        </div>
+      </div>
+      <div id="log-view" class="log-view" role="log" aria-live="polite" aria-label="go2rtc ログ"></div>
+    </section>
+
+    <!-- ── ネットワークタブ（go2rtc net.html を iframe 埋め込み・遅延ロード） ── -->
+    <section id="panel-net" class="tabpanel" role="tabpanel" aria-labelledby="tab-net" hidden>
+      <div class="embed-frame">
+        <div class="embed-cap">
+          <span data-i18n="mgmt.net.caption">go2rtc ネットワーク図（producer / consumer の接続経路） —</span>
+          <span id="net-origin">:1984</span>
+          <a id="net-open" class="embed-open" href="#" target="_blank" rel="noopener" data-i18n="mgmt.net.open">別タブで開く ↗</a>
+        </div>
+        <!-- iframe の src は streams.js が初回表示時に一度だけ注入する（遅延ロード） -->
+        <iframe id="net-frame" title="go2rtc ネットワーク図" loading="lazy" data-i18n-title="mgmt.net.frame.title"></iframe>
+      </div>
+    </section>
+  </main>
+
+  <footer class="app-footer">
+    <span id="version-info">go2rtc に接続中…</span>
+    <span class="foot-sep" aria-hidden="true"> / </span>
+    <span class="foot-links">
+      <a id="link-go2rtc" href="#" target="_blank" rel="noopener" data-i18n="mgmt.footer.link.go2rtc">go2rtc 標準UI</a>
+      <span aria-hidden="true"> · </span>
+      <a id="link-add" href="#" target="_blank" rel="noopener" data-i18n="mgmt.footer.link.add">設定で追加（add）</a>
+    </span>
+  </footer>
+
+  <!-- ストリーム1件分のカード雛形。streams.js が複製して使う。 -->
+  <template id="card-template">
+    <article class="stream-card" role="listitem">
+      <div class="sc-head">
+        <span class="sc-name" data-role="name"></span>
+        <span class="sc-online" data-role="online" title="現在の視聴者数" data-i18n-title="mgmt.card.online.title">
+          <span class="sc-online-dot" aria-hidden="true"></span>
+          <span data-role="online-text">0</span>
+        </span>
+      </div>
+
+      <div class="sc-meta">
+        <span class="sc-status" data-role="status">
+          <span class="sc-status-dot" aria-hidden="true"></span>
+          <span data-role="status-text"></span>
+        </span>
+        <span class="sc-codecs" data-role="codecs"></span>
+      </div>
+
+      <div class="sc-source" data-role="source"></div>
+
+      <div class="sc-actions">
+        <a class="btn btn--sm" data-role="watch" target="_blank" rel="noopener" title="プレイヤーで再生" data-i18n-title="mgmt.card.watch.title">
+          <span aria-hidden="true">▶&#xFE0E;</span> <span data-i18n="mgmt.card.watch.text">視聴</span>
+        </a>
+        <a class="btn btn--sm" data-role="info" target="_blank" rel="noopener" title="状態をJSONで表示" data-i18n-title="mgmt.card.info.title" data-i18n="mgmt.card.info.text">情報</a>
+        <a class="btn btn--sm" data-role="probe" target="_blank" rel="noopener" title="メディア情報を解析" data-i18n-title="mgmt.card.probe.title" data-i18n="mgmt.card.probe.text">プローブ</a>
+        <a class="btn btn--sm" data-role="links" target="_blank" rel="noopener" title="各種URL一覧" data-i18n-title="mgmt.card.links.title" data-i18n="mgmt.card.links.text">リンク</a>
+        <a class="btn btn--sm" data-role="net" target="_blank" rel="noopener" title="接続経路の図" data-i18n-title="mgmt.card.net.title" data-i18n="mgmt.card.net.text">ネット</a>
+        <button type="button" class="btn btn--sm btn--danger sc-del" data-role="delete" title="このストリームを削除" data-i18n-title="mgmt.card.delete.title">
+          <span aria-hidden="true">🗑</span> <span data-i18n="mgmt.card.delete.text">削除</span>
+        </button>
+      </div>
+    </article>
+  </template>
+
+  <script src="./i18n.js?v=10"></script>
+  <script type="module" src="./streams.js?v=10"></script>
+</body>
+</html>

@@ -1,0 +1,21 @@
+{
+  "cameras": [
+    {
+      "id": "cam1",
+      "name": "Camera 1",
+      "ip": "${CAM_IP}",
+      "stream": "cam1",
+      "stream_hd": "cam1_hd",
+      "enabled": true
+    },
+    {
+      "id": "cam2",
+      "name": "Camera 2",
+      "ip": "",
+      "stream": "cam2",
+      "stream_hd": "cam2_hd",
+      "enabled": false,
+      "note": "Example second camera. Define cam2 / cam2_hd in go2rtc.yaml, set its ip, and switch enabled to true."
+    }
+  ]
+}

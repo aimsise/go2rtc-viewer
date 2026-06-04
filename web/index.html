@@ -1,0 +1,219 @@
+<!DOCTYPE html>
+<html lang="en" data-title-key="common.brand.title">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <meta name="color-scheme" content="dark" />
+  <meta name="robots" content="noindex, nofollow" />
+  <!--
+    Content-Security-Policy（多層防御）。既定では LAN/loopback の go2rtc(:1984) だけを
+    参照する。?go2rtc= や cameras.json で go2rtc を別ホストに向ける場合は、そのオリジン
+    （例 http://192.0.2.50:1984）を script-src / img-src / media-src / connect-src に
+    追記すること。（クリックジャック対策の frame-ancestors は HTTP ヘッダ専用で
+    meta タグでは無効なため付与していない。静的サーバ運用では設定できない点に留意。）
+  -->
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' http://localhost:1984 http://127.0.0.1:1984; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: http://localhost:1984 http://127.0.0.1:1984; media-src 'self' blob: http://localhost:1984 http://127.0.0.1:1984; connect-src 'self' http://localhost:1984 http://127.0.0.1:1984 ws://localhost:1984 ws://127.0.0.1:1984; base-uri 'self'; object-src 'none'; form-action 'self'" />
+  <title data-i18n="common.brand.title">防犯カメラ ビューア</title>
+  <!--
+    インライン SVG ファビコン（外部ファイル不要）。ダークの角丸に青ドット＝
+    ヘッダの brand-mark（アクセント色）と同系色。これが無いとブラウザが
+    /favicon.ico を要求し 404（コンソールエラー）になるため、データ URI で
+    同梱して 404 を防ぐ。
+  -->
+  <link
+    rel="icon"
+    href="data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2032%2032'%3E%3Crect%20width='32'%20height='32'%20rx='7'%20fill='%230d1117'/%3E%3Ccircle%20cx='16'%20cy='16'%20r='6'%20fill='%232f81f7'/%3E%3C/svg%3E"
+  />
+  <!-- ?v= はキャッシュ回避。CSS/JS を更新したらこの番号を上げると、再読み込みで確実に最新が反映される。 -->
+  <link rel="stylesheet" href="./style.css?v=10" />
+  <!--
+    VideoRTC Web Component (video-stream.js) は go2rtc サーバ本体が配信する。
+    ダッシュボードを go2rtc とは別オリジンから開いても動くよう、
+    script の src は app.js 内の GO2RTC_BASE を基準に動的注入する。
+    実際の読み込みは app.js が担う。
+  -->
+</head>
+<body>
+  <header class="app-header">
+    <div class="brand">
+      <!-- カメラ字形（旧 brand-dot を置換。状態灯と紛らわしい緑ドットを廃止） -->
+      <span class="brand-mark" aria-hidden="true">
+        <svg viewBox="0 0 24 24" width="14" height="14" fill="none"
+             stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="2" y="6" width="14" height="12" rx="2.5" />
+          <path d="M16 10l6-3v10l-6-3z" />
+        </svg>
+      </span>
+      <h1 class="brand-title" data-i18n="common.brand.title">防犯カメラ ビューア</h1>
+      <span class="brand-sub" data-i18n="viewer.brand.sub">ローカル専用 / LAN内</span>
+    </div>
+
+    <div class="header-actions">
+      <!--
+        画面分割切替（1 / 2 / 4 / 6）。各ボタンは「ミニグリッド字形＋数字＋画面」で
+        何画面に分割するかを一目で伝える。app.js は dataset.layout のみ参照し、
+        is-active / aria-pressed を切替える（内側の span 群には触れない）。
+      -->
+      <div class="layout-group">
+        <span class="layout-caption" aria-hidden="true" data-i18n="common.layout.caption">画面分割</span>
+        <div id="layout-switch" class="layout-switch" role="group" aria-label="画面分割（同時に表示する数）" data-i18n-aria-label="common.layout.group.aria">
+          <button type="button" class="layout-btn" data-layout="1" aria-pressed="false"
+                  title="1画面：1台を大きく表示" data-i18n-title="viewer.layout.btn1.title">
+            <span class="lb-grid lb-grid--1" aria-hidden="true"><i></i></span>
+            <span class="lb-num">1</span><span class="lb-word" data-i18n="viewer.layout.btn.word">画面</span>
+          </button>
+          <button type="button" class="layout-btn" data-layout="2" aria-pressed="false"
+                  title="2画面：横に2台を並べて表示" data-i18n-title="viewer.layout.btn2.title">
+            <span class="lb-grid lb-grid--2" aria-hidden="true"><i></i><i></i></span>
+            <span class="lb-num">2</span><span class="lb-word" data-i18n="viewer.layout.btn.word">画面</span>
+          </button>
+          <button type="button" class="layout-btn" data-layout="4" aria-pressed="false"
+                  title="4画面：2×2で4台を表示" data-i18n-title="viewer.layout.btn4.title">
+            <span class="lb-grid lb-grid--4" aria-hidden="true"><i></i><i></i><i></i><i></i></span>
+            <span class="lb-num">4</span><span class="lb-word" data-i18n="viewer.layout.btn.word">画面</span>
+          </button>
+          <button type="button" class="layout-btn" data-layout="6" aria-pressed="false"
+                  title="6画面：3×2で6台を表示" data-i18n-title="viewer.layout.btn6.title">
+            <span class="lb-grid lb-grid--6" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i></span>
+            <span class="lb-num">6</span><span class="lb-word" data-i18n="viewer.layout.btn.word">画面</span>
+          </button>
+        </div>
+      </div>
+
+      <span id="conn-status" class="conn-status conn-status--unknown" title="go2rtc サーバーとの接続状態" data-i18n-title="common.go2rtc.connStatus.title">
+        <span class="conn-dot" aria-hidden="true"></span>
+        <span class="conn-label" data-i18n="common.connStatus.checking">接続確認中…</span>
+      </span>
+      <button id="reload-btn" type="button" class="btn btn--ghost" title="カメラ一覧と映像を更新します（ページを再読み込み）" data-i18n-title="viewer.reload.title">
+        <span class="btn-icon" aria-hidden="true">⟳</span><span class="btn-text" data-i18n="common.reload.text">更新</span>
+      </button>
+
+      <!-- ビューア ⇄ 管理 の画面切替（管理ページと同一マークアップ。ここではビューアが active） -->
+      <nav class="view-switch" aria-label="画面切替" data-i18n-aria-label="common.viewSwitch.aria">
+        <a class="view-link is-active" href="./index.html" aria-current="page" title="カメラ映像を見る" data-i18n-title="common.viewSwitch.viewer.title">
+          <span class="vl-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor"
+                 stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <rect x="3" y="4" width="18" height="14" rx="2" /><path d="M8 21h8" /><path d="M12 18v3" />
+            </svg>
+          </span><span class="vl-text" data-i18n="common.viewSwitch.viewer.text">ビューア</span>
+        </a>
+        <a class="view-link" href="./streams.html" title="go2rtc のストリームを管理" data-i18n-title="common.viewSwitch.manage.title">
+          <span class="vl-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor"
+                 stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <line x1="4" y1="6" x2="20" y2="6" /><line x1="4" y1="12" x2="20" y2="12" /><line x1="4" y1="18" x2="20" y2="18" />
+              <circle cx="9" cy="6" r="2" fill="currentColor" stroke="none" /><circle cx="15" cy="12" r="2" fill="currentColor" stroke="none" /><circle cx="9" cy="18" r="2" fill="currentColor" stroke="none" />
+            </svg>
+          </span><span class="vl-text" data-i18n="common.viewSwitch.manage.text">管理</span>
+        </a>
+      </nav>
+
+      <div class="lang-switch" role="group" aria-label="言語 / Language">
+        <button type="button" class="lang-btn" data-lang="ja" aria-pressed="false">日本語</button>
+        <button type="button" class="lang-btn" data-lang="en" aria-pressed="true">EN</button>
+      </div>
+
+      <!-- ヘルプ / 凡例（<details> 駆動・JSなし）。各操作の意味を1か所で説明。 -->
+      <details class="help">
+        <summary class="btn btn--ghost help-btn" title="各ボタンの意味を表示" data-i18n-title="common.help.title">
+          <span class="btn-icon" aria-hidden="true">?</span><span class="btn-text" data-i18n="common.help.text">ヘルプ</span>
+        </summary>
+        <div class="help-panel" role="dialog" aria-label="操作ガイド" data-i18n-aria-label="common.help.panel.aria">
+          <h2 class="help-title" data-i18n="common.help.title">操作ガイド</h2>
+          <ul class="help-list">
+            <li><span class="lg lg-4" aria-hidden="true"><i></i><i></i><i></i><i></i></span>
+                <b data-i18n="viewer.help.layout.term">画面分割</b> — <span data-i18n="viewer.help.layout.desc">同時に表示する数（1=単画面 / 2=横2 / 4=2×2 / 6=3×2）</span></li>
+            <li><span class="chip chip-hd">HD</span>
+                <b data-i18n="viewer.help.hd.term">画質HD</b> — <span data-i18n="viewer.help.hd.desc">高画質に切替（もう一度押すとSDに戻る・HD無しは押せません）</span></li>
+            <li><span class="chip">⤓</span>
+                <b data-i18n="viewer.help.snapshot.term">撮影</b> — <span data-i18n="viewer.help.snapshot.desc">今の映像を1枚の画像（JPEG）で保存</span></li>
+            <li><span class="chip">⛶</span>
+                <b data-i18n="viewer.help.fullscreen.term">全画面</b> — <span data-i18n="viewer.help.fullscreen.desc">その映像だけを画面いっぱいに表示（Escで戻る）</span></li>
+            <li><span class="chip">▾</span>
+                <b data-i18n="viewer.help.camSelect.term">カメラ選択</b> — <span data-i18n="viewer.help.camSelect.desc">その枠に映すカメラを選ぶ（同じカメラは他の枠から自動で外れます）</span></li>
+          </ul>
+          <h3 class="help-sub" data-i18n="viewer.help.legend.sub">表示の見方</h3>
+          <ul class="help-list">
+            <li><span class="dot dot-live"></span><b>LIVE</b> — <span data-i18n="viewer.help.legend.live.desc">映像を受信中（右上）</span></li>
+            <li><span class="chip chip-q" data-i18n="viewer.help.legend.quality.chip">画質</span><b>SD / HD</b> — <span data-i18n="viewer.help.legend.quality.desc">今の画質（左上）</span></li>
+            <li><span class="dot dot-ok"></span><b data-i18n="viewer.help.legend.connOk.term">接続OK</b> — <span data-i18n="viewer.help.legend.connOk.desc">go2rtc と通信できています</span></li>
+            <li><span class="dot dot-err"></span><b data-i18n="viewer.help.legend.connErr.term">未接続</b> — <span data-i18n="viewer.help.legend.connErr.desc">go2rtc を起動してください</span></li>
+          </ul>
+          <p class="help-foot" data-i18n="viewer.help.foot">映像は go2rtc 経由（H.265→H.264）。録画はしません。</p>
+        </div>
+      </details>
+    </div>
+  </header>
+
+  <main class="app-main">
+    <!-- ペイン（カメラ枠）は app.js が cameras.json とレイアウト設定から動的生成する。 -->
+    <div id="grid" class="pane-grid" data-layout="1" role="list" aria-label="カメラ枠一覧" data-i18n-aria-label="viewer.grid.aria">
+    </div>
+
+    <div id="empty-state" class="empty-state" hidden>
+      <p class="empty-title" data-i18n="viewer.empty.title">カメラがありません</p>
+      <p class="empty-desc" data-i18n="viewer.empty.desc">cameras.json を確認してください。</p>
+    </div>
+  </main>
+
+  <!--
+    ペインの雛形（template）。app.js がこれを複製して各枠を作る。
+    1枠 = カメラ選択ドロップダウン + <video-stream> + 名前/IP + SD/HD + 撮影 + 全画面。
+  -->
+  <template id="pane-template">
+    <article class="pane" role="listitem">
+      <div class="pane-video-wrap" data-role="video-wrap">
+        <!-- <video-stream> は app.js が生成して wrap.firstChild の前に差し込む（未割当時は差し込まない） -->
+        <div class="cam-badge cam-badge--quality" data-role="quality-badge"
+             title="現在の画質（SD=軽量 / HD=高画質）" data-i18n-title="viewer.pane.qualityBadge.title" hidden>SD</div>
+        <!-- LIVE インジケータ（is-live クラスに連動して表示。JS は触れない） -->
+        <div class="cam-live" aria-hidden="true"><span class="cam-live-dot"></span>LIVE</div>
+        <div class="pane-placeholder" data-role="placeholder">
+          <span class="pane-placeholder-icon" aria-hidden="true">＋</span>
+          <span class="pane-placeholder-text" data-role="placeholder-text" data-i18n="viewer.pane.placeholder.unassigned">カメラ未割当</span>
+          <span class="pane-placeholder-hint" aria-hidden="true"></span>
+        </div>
+        <div class="cam-overlay" data-role="overlay" hidden>
+          <span class="cam-overlay-text" data-role="overlay-text"></span>
+        </div>
+      </div>
+
+      <div class="pane-bar">
+        <div class="pane-meta">
+          <span class="meta-cap" aria-hidden="true" data-i18n="common.camera.caption">カメラ</span>
+          <!-- カメラ選択ドロップダウン。app.js が <option> を流し込む。 -->
+          <select class="pane-select" data-role="camera-select"
+                  aria-label="この枠に表示するカメラを選ぶ"
+                  title="この枠に表示するカメラを選びます"
+                  data-i18n-aria-label="viewer.pane.select.aria"
+                  data-i18n-title="viewer.pane.select.title"></select>
+          <span class="cam-addr" data-role="addr" title="カメラのIPアドレス" data-i18n-title="viewer.pane.addr.title"></span>
+        </div>
+
+        <div class="cam-controls" role="group" aria-label="この映像の操作" data-i18n-aria-label="viewer.pane.controls.aria">
+          <span class="controls-cap" aria-hidden="true" data-i18n="viewer.pane.controls.caption">操作</span>
+          <button type="button" class="btn btn--hd" data-role="hd-toggle" title="HD（高画質）に切替" aria-pressed="false" data-i18n-title="viewer.pane.hd.title">
+            <span class="btn-text" data-i18n="common.hd.text">画質HD</span>
+          </button>
+          <button type="button" class="btn btn--icon" data-role="snapshot" title="今の映像を1枚JPEGで保存" data-i18n-title="viewer.pane.snapshot.title">
+            <span class="btn-icon" aria-hidden="true">⤓</span>
+            <span class="btn-text" data-i18n="common.snapshot.text">撮影</span>
+          </button>
+          <button type="button" class="btn btn--icon" data-role="fullscreen" title="この映像を全画面表示（Escで戻る）" data-i18n-title="viewer.pane.fullscreen.title">
+            <span class="btn-icon" aria-hidden="true">⛶</span>
+            <span class="btn-text" data-i18n="common.fullscreen.text">全画面</span>
+          </button>
+        </div>
+      </div>
+    </article>
+  </template>
+
+  <footer class="app-footer">
+    <span data-i18n="viewer.footer">go2rtc 経由で H.265 → H.264 トランスコード配信 / WebRTC 優先・MSE フォールバック</span>
+  </footer>
+
+  <script src="./i18n.js?v=10"></script>
+  <script type="module" src="./app.js?v=10"></script>
+</body>
+</html>
