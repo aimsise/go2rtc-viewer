@@ -1,0 +1,51 @@
+# go2rtc binary (downloaded on demand by start.sh)
+bin/
+
+# Node dependencies (this project uses the standard library only, but ignore
+# node_modules defensively in case tooling/deps are added later).
+node_modules/
+package-lock.json
+
+# Runtime state and logs
+go2rtc.pid
+go2rtc.log
+*.log
+
+# playwright-cli automation output (snapshots, console logs, screenshots).
+# Created by browser-based verification; never part of the app source.
+.playwright-cli/
+
+# Recording feature: track the source (server.js / web / README), but ignore
+# all runtime output (downloaded & transcoded clips, thumbnails, cache, state).
+recordings/data/
+recordings/clips/
+recordings/thumbs/
+recordings/cache/
+recordings/*.pid
+recordings/*.log
+recordings/*.mp4
+recordings/*.flv
+recordings/*.ts
+recordings/*.jpg
+recordings/*.jpeg
+recordings/*.png
+
+# Local handoff / working notes — may contain network details & credentials.
+# Never commit (created by request; keep machine-local).
+.docs/
+
+# Local secrets (real IPs / RTSP & DVR credentials) and generated config.
+# Track .env.example and *.template.json; ignore the real/generated copies.
+.env
+.env.*
+!.env.example
+recordings/.env
+cameras.json
+
+# Claude Code machine-local settings (permission allowlists etc.). The repo
+# ships the shared .claude/ tooling but never the per-machine local override.
+.claude/settings.local.json
+
+# Python bytecode cache (e.g. from running the secret-guard hook / tests locally)
+__pycache__/
+*.pyc

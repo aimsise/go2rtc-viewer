@@ -1,0 +1,12 @@
+go2rtc-viewer
+Copyright 2026 go2rtc-viewer contributors
+
+This product is licensed under the Apache License, Version 2.0 (see LICENSE).
+
+This product depends on, but does not bundle or redistribute, the following
+third-party software:
+
+- go2rtc (https://github.com/AlexxIT/go2rtc) — MIT License.
+  Downloaded at runtime by start.sh; not included in this repository.
+- FFmpeg (https://ffmpeg.org/) — LGPL/GPL.
+  Invoked as an external binary; not included in this repository.
