@@ -45,10 +45,13 @@ streams:
   # if your camera sends PCMA/G.711 audio; drop or change it otherwise.
   cam1: ffmpeg:rtsp://${RTSP_USER}:${RTSP_PASS}@${CAM_IP}:554/${CAM_PATH_SUB}#video=h264#audio=pcma
 
-  # High-definition view (main stream), video only. We list ONLY the H.264
-  # transcode (not the raw HEVC) so every consumer (WebRTC / MSE / HLS / mp4)
-  # receives H.264 — a raw-HEVC source would be handed to MSE and fail to decode.
-  cam1_hd: ffmpeg:rtsp://${RTSP_USER}:${RTSP_PASS}@${CAM_IP}:554/${CAM_PATH_HD}#video=h264
+  # High-definition view (main stream). Same H.264 transcode as the sub stream,
+  # plus audio. We list ONLY the H.264 transcode (not the raw HEVC) so every
+  # consumer (WebRTC / MSE / HLS / mp4) receives H.264 — a raw-HEVC source would
+  # be handed to MSE and fail to decode. #audio=pcma matches the sub stream; keep
+  # it only if the camera's MAIN stream actually carries PCMA/G.711 audio (drop
+  # it, or use #audio=opus / #audio=aac, otherwise).
+  cam1_hd: ffmpeg:rtsp://${RTSP_USER}:${RTSP_PASS}@${CAM_IP}:554/${CAM_PATH_HD}#video=h264#audio=pcma
 
   # Add more cameras by copying the two lines above as cam2 / cam2_hd, etc., each
   # with its own host/credentials/paths (and a matching entry in cameras.json).

@@ -52,3 +52,6 @@ jobs:
 
       - name: No real secrets in tracked files
         run: node tests/no-real-secrets.js
+
+      - name: ONVIF Profile G client unit tests
+        run: node tests/onvif-client.js

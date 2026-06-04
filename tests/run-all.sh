@@ -28,6 +28,7 @@ run "syntax-checks"   bash  "$SCRIPT_DIR/syntax-checks.sh"
 run "i18n-parity"     node  "$SCRIPT_DIR/i18n-parity.js"
 run "secret-guard"    bash  "$SCRIPT_DIR/secret-guard.sh"
 run "no-real-secrets" node  "$SCRIPT_DIR/no-real-secrets.js"
+run "onvif-client"    node  "$SCRIPT_DIR/onvif-client.js"
 
 echo ""
 if [ "$rc" -ne 0 ]; then

@@ -6,7 +6,7 @@ LAN-only security-camera app. **No build tools, no package.json, no framework.**
 - **Frontend** (`web/`): vanilla JS static files served by `python3 -m http.server 8000`.
   Two pages share `style.css`: viewer `index.html` (`app.js`) + management `streams.html` (`streams.js`, also loads `streams.css`).
 - **go2rtc** Go binary (`bin/`, gitignored, downloaded by `start.sh`): reads `go2rtc.yaml`, serves `:1984` (WebRTC/MSE viewer + REST API).
-- **recordings/**: Node helper, **standard-library only** (`server.js`, `download-cli.js`). No deps.
+- **recordings/**: Node helper, **standard-library only** (`server.js`, `download-cli.js`). No deps. Default backend is an **ONVIF Profile G client (`recordings/onvif.js`)** for vendor-neutral recording search + replay; the legacy **netsdk/flv.cgi** path is retained as an opt-in fallback via **`RECORDINGS_BACKEND=onvif|netsdk`** (default `onvif`). ONVIF times are UTC (`Z`) with measured clock-skew (NOT host-local like the legacy path); `chn` is a server-side stable index over RecordingTokens; the source-badge match includes `onvif`. Still **unverified against real Profile G hardware** (the on-hand unit 404s on `/onvif/*`) — best-effort.
 - **bash**: `start.sh` (boots go2rtc), `stop.sh`, `gen-config.sh`.
 
 ## JS CONTRACT — never remove/rename these without updating the JS

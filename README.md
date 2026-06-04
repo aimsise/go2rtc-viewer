@@ -237,7 +237,7 @@ The following is an example of adding `cam2` and `cam3` (adjust the IPs, RTSP pa
 
 ### 1. Add a Stream to go2rtc.yaml
 
-Add two entries — sub (default) and main (HD) — to the `streams:` section of `go2rtc.yaml`. If the camera streams H.265, route it through `ffmpeg:...#video=h264` so the browser can play it; if it already streams H.264, drop the `ffmpeg:` prefix and use `rtsp://...` directly (no transcode, lower CPU). This repository's naming convention is **default (sub) = `camN`, HD (main) = `camN_hd`** (`cam1` / `cam1_hd`, `cam2` / `cam2_hd`, …). Audio (`#audio=pcma`) is added only on the sub side, and only if your camera has audio; the high-res main side omits audio to reduce load.
+Add two entries — sub (default) and main (HD) — to the `streams:` section of `go2rtc.yaml`. If the camera streams H.265, route it through `ffmpeg:...#video=h264` so the browser can play it; if it already streams H.264, drop the `ffmpeg:` prefix and use `rtsp://...` directly (no transcode, lower CPU). This repository's naming convention is **default (sub) = `camN`, HD (main) = `camN_hd`** (`cam1` / `cam1_hd`, `cam2` / `cam2_hd`, …). Audio (`#audio=pcma`) is added on both the sub and main (HD) sides, provided the camera streams audio on that channel; omit it (or switch to `#audio=opus` / `#audio=aac`) otherwise.
 
 The RTSP sub/main paths differ by vendor. Set them in `.env` as `CAM_PATH_SUB` / `CAM_PATH_HD`, for example:
 
@@ -252,21 +252,21 @@ streams:
   # --- existing: cam1 (resolved from .env via ${VAR}) ---
   # Default display is sub (lightweight). Video H.264 + audio PCMA (if present).
   cam1: ffmpeg:rtsp://${RTSP_USER}:${RTSP_PASS}@${CAM_IP}:554/${CAM_PATH_SUB}#video=h264#audio=pcma
-  # HD (main, high-res). Video only, H.264.
-  cam1_hd: ffmpeg:rtsp://${RTSP_USER}:${RTSP_PASS}@${CAM_IP}:554/${CAM_PATH_HD}#video=h264
+  # HD (main, high-res). Video H.264 + audio PCMA (if present).
+  cam1_hd: ffmpeg:rtsp://${RTSP_USER}:${RTSP_PASS}@${CAM_IP}:554/${CAM_PATH_HD}#video=h264#audio=pcma
 
   # --- addition example: cam2 (replace <camera-ip> and the RTSP paths) ---
   cam2: ffmpeg:rtsp://${RTSP_USER}:${RTSP_PASS}@<camera-ip>:554/<sub-stream-path>#video=h264#audio=pcma
-  cam2_hd: ffmpeg:rtsp://${RTSP_USER}:${RTSP_PASS}@<camera-ip>:554/<main-stream-path>#video=h264
+  cam2_hd: ffmpeg:rtsp://${RTSP_USER}:${RTSP_PASS}@<camera-ip>:554/<main-stream-path>#video=h264#audio=pcma
 
   # --- addition example: cam3 ---
   cam3: ffmpeg:rtsp://${RTSP_USER}:${RTSP_PASS}@<camera-ip>:554/<sub-stream-path>#video=h264#audio=pcma
-  cam3_hd: ffmpeg:rtsp://${RTSP_USER}:${RTSP_PASS}@<camera-ip>:554/<main-stream-path>#video=h264
+  cam3_hd: ffmpeg:rtsp://${RTSP_USER}:${RTSP_PASS}@<camera-ip>:554/<main-stream-path>#video=h264#audio=pcma
 ```
 
 > **Notes**
 > - `#video=h264` is go2rtc's built-in transcoding template. It converts H.265 video to H.264. If the camera already streams H.264, omit it (and the `ffmpeg:` prefix).
-> - `#audio=pcma` passes the original PCMA / G.711 through as-is, WebRTC-compatible. Add it only if your camera sends audio. If you do not need audio, omit `#audio` (the high-res main side omits it).
+> - `#audio=pcma` passes the original PCMA / G.711 through as-is, WebRTC-compatible. Add it on any stream whose camera channel carries audio — the sub and main (HD) examples above both include it. If you do not need audio (or that channel has none), omit `#audio` on that stream, or switch to `#audio=opus` (WebRTC) / `#audio=aac` (MSE / mp4 recordings) if PCMA does not fit.
 > - **Do not list raw H.265 (HEVC) RTSP alongside it in the same stream.** Because go2rtc uses the first source the consumer can accept, listing HEVC alongside it would cause MSE and others to grab HEVC and fail to play. Register only the H.264 transcode.
 > - **If you do not want to write credentials inline**, see "Separating credentials" in the [Security Warnings](#security-warnings-must-read).
 
@@ -409,7 +409,7 @@ Points especially important for the recording feature:
 
   ```yaml
   # Example: add hardware assist to HD (main, high-res)
-  cam1_hd: ffmpeg:rtsp://${RTSP_USER}:${RTSP_PASS}@${CAM_IP}:554/${CAM_PATH_HD}#video=h264#hardware=videotoolbox
+  cam1_hd: ffmpeg:rtsp://${RTSP_USER}:${RTSP_PASS}@${CAM_IP}:554/${CAM_PATH_HD}#video=h264#audio=pcma#hardware=videotoolbox
   ```
 
 ### ffmpeg Not Found

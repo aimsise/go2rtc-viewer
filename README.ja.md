@@ -237,7 +237,7 @@ go2rtc 側では、サブ用とメイン用をそれぞれ別ストリームと�
 
 ### 1. go2rtc.yaml にストリームを追加
 
-`go2rtc.yaml` の `streams:` セクションに、サブ（既定）/ メイン（HD）の 2 つを追加します。H.265 のカメラはブラウザで直接再生できないため、`ffmpeg:...#video=h264` を経由させます（カメラが既に H.264 を配信できる場合は `ffmpeg:` を外し `rtsp://...` を直接指定可能）。本リポジトリの命名規則は **既定（サブ）= `camN`、HD（メイン）= `camN_hd`**（`cam1` / `cam1_hd`、`cam2` / `cam2_hd`、…）です。RTSP のパスは機種ごとに異なります。サブ側のみ音声（`#audio=pcma`）を付け、メイン側は負荷軽減のため音声を省略しています（音声はカメラに音声がある場合の任意指定です）。
+`go2rtc.yaml` の `streams:` セクションに、サブ（既定）/ メイン（HD）の 2 つを追加します。H.265 のカメラはブラウザで直接再生できないため、`ffmpeg:...#video=h264` を経由させます（カメラが既に H.264 を配信できる場合は `ffmpeg:` を外し `rtsp://...` を直接指定可能）。本リポジトリの命名規則は **既定（サブ）= `camN`、HD（メイン）= `camN_hd`**（`cam1` / `cam1_hd`、`cam2` / `cam2_hd`、…）です。RTSP のパスは機種ごとに異なります。サブ・メイン（HD）の両方に音声（`#audio=pcma`）を付けています。そのチャンネルにカメラが音声を載せている場合のみ有効で、なければ省略するか `#audio=opus` / `#audio=aac` に変更してください。
 
 RTSP のサブ／メインのパスは機種ごとに異なります。例:
 
@@ -252,21 +252,21 @@ streams:
   # --- 既存: cam1（<camera-ip>） ---
   # 既定表示はサブ（軽量）。映像 H.264 +（カメラに音声があれば）音声 PCMA。
   cam1: ffmpeg:rtsp://${RTSP_USER}:${RTSP_PASS}@${CAM_IP}:554/${CAM_PATH_SUB}#video=h264#audio=pcma
-  # HD（メイン／高解像度）。映像のみ H.264。
-  cam1_hd: ffmpeg:rtsp://${RTSP_USER}:${RTSP_PASS}@${CAM_IP}:554/${CAM_PATH_HD}#video=h264
+  # HD（メイン／高解像度）。映像 H.264 +（音声があれば）音声 PCMA。
+  cam1_hd: ffmpeg:rtsp://${RTSP_USER}:${RTSP_PASS}@${CAM_IP}:554/${CAM_PATH_HD}#video=h264#audio=pcma
 
   # --- 追加例: cam2 ---
   cam2: ffmpeg:rtsp://${RTSP_USER}:${RTSP_PASS}@<camera-ip>:554/<sub-stream-path>#video=h264#audio=pcma
-  cam2_hd: ffmpeg:rtsp://${RTSP_USER}:${RTSP_PASS}@<camera-ip>:554/<main-stream-path>#video=h264
+  cam2_hd: ffmpeg:rtsp://${RTSP_USER}:${RTSP_PASS}@<camera-ip>:554/<main-stream-path>#video=h264#audio=pcma
 
   # --- 追加例: cam3 ---
   cam3: ffmpeg:rtsp://${RTSP_USER}:${RTSP_PASS}@<camera-ip>:554/<sub-stream-path>#video=h264#audio=pcma
-  cam3_hd: ffmpeg:rtsp://${RTSP_USER}:${RTSP_PASS}@<camera-ip>:554/<main-stream-path>#video=h264
+  cam3_hd: ffmpeg:rtsp://${RTSP_USER}:${RTSP_PASS}@<camera-ip>:554/<main-stream-path>#video=h264#audio=pcma
 ```
 
 > **補足**
 > - `#video=h264` は go2rtc 組み込みのトランスコードテンプレートです。映像を H.264 に変換します。カメラが H.264 を配信できる場合は省略でき、`rtsp://...` を直接指定すれば変換不要で CPU 軽量になります。
-> - `#audio=pcma` は元の PCMA / G.711 を WebRTC 互換のまま渡します（PCMA は WebRTC で再生可能）。**カメラに音声がある場合の任意指定**です。音声不要・音声非対応なら `#audio` を省略してください（メイン側は省略しています）。
+> - `#audio=pcma` は元の PCMA / G.711 を WebRTC 互換のまま渡します（PCMA は WebRTC で再生可能）。音声を載せているチャンネルに付けます（上記の例ではサブ・メインとも付けています）。音声不要・音声非対応ならそのストリームの `#audio` を省略してください。PCMA が合わない場合は `#audio=opus`（WebRTC）/ `#audio=aac`（MSE・mp4 録画）に変更します。
 > - **生の H.265（HEVC）RTSP を同じストリームに併記しないでください。** go2rtc は消費者が受理できる最初のソースを使うため、HEVC を併記すると MSE などが HEVC を掴んで再生に失敗します。H.264 トランスコードのみを登録します。
 > - **認証情報を直書きしたくない場合**は、[セキュリティ警告](#セキュリティ警告必読) の「認証情報の分離」を参照してください。
 
@@ -419,7 +419,7 @@ node recordings/server.js
 
   ```yaml
   # 例: HD（メイン／高解像度）にハードウェア支援を付ける
-  cam1_hd: ffmpeg:rtsp://${RTSP_USER}:${RTSP_PASS}@${CAM_IP}:554/${CAM_PATH_HD}#video=h264#hardware=videotoolbox
+  cam1_hd: ffmpeg:rtsp://${RTSP_USER}:${RTSP_PASS}@${CAM_IP}:554/${CAM_PATH_HD}#video=h264#audio=pcma#hardware=videotoolbox
   ```
 
 ### ffmpeg が見つからない
